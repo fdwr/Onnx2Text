@@ -32,7 +32,7 @@
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{C6A45EA5-9793-4F71-ADAA-5A6CE4456D84}</ProjectGuid>
     <RootNamespace>OpModels</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.18262.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
     <ProjectName>ConvertOnnxModel</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

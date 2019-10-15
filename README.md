@@ -1,4 +1,6 @@
-ConvertOnnxModel 2018-07-19..2019-02-26 FDR
+ConvertOnnxModel  
+2018-07-19..2019-02-26  
+Dwayne Robinson (FDwR)  
 
 Converts a binary ONNX model file to text (which can be edited in any simple text editor) and vice versa.
 Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
