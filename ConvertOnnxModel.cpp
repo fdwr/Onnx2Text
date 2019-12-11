@@ -12,7 +12,7 @@
 
 #pragma warning(push)
 #pragma warning(disable: 4146)
-#include "onnx-ml.pb.h"
+#include "onnx.pb.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/any.pb.h"
 #include "google/protobuf/io/zero_copy_stream.h"
@@ -1183,7 +1183,7 @@ void ConvertTensor(
     }
 
     // Read the data type and dimensions back from the tensor.
-    dataType = tensor.data_type();
+    dataType = onnx::TensorProto::DataType(tensor.data_type());
     if (resolvedDimensions.empty())
     {
         for (auto v : tensor.dims())
@@ -1222,7 +1222,7 @@ void ConvertTensor(
     {
         std::string byteData = GetOnnxTensorRawByteData(tensor);
         std::string text;
-        WriteCsv(byteData, tensor.data_type(), /*out*/ text);
+        WriteCsv(byteData, onnx::TensorProto::DataType(tensor.data_type()), /*out*/ text);
         WriteBinaryFile(outputFilename, text);
     }
     else if (outputFileExtensionType == FileExtensionType::Image)
@@ -1435,7 +1435,8 @@ int Main(int argc, wchar_t** argv)
     printf(
         "Input filename:  %S\r\n"
         "Output filename: %S\r\n"
-        "Conversion mode: %s\r\n",
+        "Conversion mode: %s\r\n"
+        "\r\n",
         inputFilename.c_str(),
         outputFilename.c_str(),
         g_conversionModeNames[uint32_t(conversionMode)]
@@ -1483,12 +1484,12 @@ int wmain(int argc, wchar_t** argv)
     }
     catch (std::exception const& e)
     {
-        std::cout << e.what();
+        std::cout << e.what() << "\r\n";
         return EXIT_FAILURE;
     }
     catch (...)
     {
-        std::cout << "Unknown error.";
+        std::cout << "Unknown error\r\n.";
         return EXIT_FAILURE;
     }
 

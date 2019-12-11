@@ -47,8 +47,16 @@ the executable. If you need a different configuration:
 
 Download/clone: https://github.com/protocolbuffers/protobuf/releases/tag/v3.5.1
 
-> cd protobuf-3.5.1\cmake\build\solution\
-> cmake -G "Visual Studio 15 2017" -DCMAKE_INSTALL_PREFIX=../../../../install ../.. -Dprotobuf_BUILD_TESTS=OFF
-> start protobuf-3.5.1\cmake\build\solution\protobuf.sln
+    cd protobuf-3.5.1\cmake\build\solution\
+    cmake -G "Visual Studio 15 2017" -DCMAKE_INSTALL_PREFIX=../../../../install ../.. -Dprotobuf_BUILD_TESTS=OFF
+    start protobuf-3.5.1\cmake\build\solution\protobuf.sln
 
 Build libprotobuf.vcxproj project. Find the .lib files under protobuf-3.5.1\cmake\build\solution\*.
+
+# Updating ONNX Proto file.
+
+Copy the newest version of `onnx.proto` from https://github.com/onnx/onnx/blob/master/onnx/onnx.proto.
+
+Run the ProtoBuf compiler.
+
+    protobuf3.5.1\bin\protoc.exe onnx.proto --cpp_out=. --error_format=msvs
