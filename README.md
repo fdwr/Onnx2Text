@@ -1,5 +1,5 @@
 ConvertOnnxModel  
-2018-07-19..2019-02-26  
+2018-07-19..2020-02-13  
 Dwayne Robinson (FDwR)  
 
 Converts a binary ONNX model file to text (which can be edited in any simple text editor) and vice versa.
@@ -11,7 +11,7 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
 # Example usage
     ConvertOnnxModel.exe Foo.onnx Foo.txt // ONNX model binary file to text representation
     ConvertOnnxModel.exe Foo.txt Foo.onnx // ONNX model text representation to binary file
-    ConvertOnnxModel.exe -tensor Foo.pb Foo.csv
+    ConvertOnnxModel.exe -tensor Foo.pb Foo.csv // Tensor protobuf file to comma separated values
     ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat
     ConvertOnnxModel.exe -tensor file.pb file.txt // Tensor brotobuf to text
     ConvertOnnxModel.exe -tensor file.pb file.png // Tensor protobuf to PNG image
