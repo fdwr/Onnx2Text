@@ -19,9 +19,13 @@
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #pragma warning(pop)
 
+#include "half/half.hpp"
+
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <wincodec.h>
+
+using float16 = half_float::half;
 
 extern "C"
 {
@@ -317,7 +321,7 @@ void ReadCsv(
             case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      *reinterpret_cast<int64_t*> (data) = static_cast<int64_t> (value); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: *reinterpret_cast<double*>  (data) = static_cast<double>  (value); break;
-            // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value); break;
             default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
             }
         }
@@ -407,7 +411,7 @@ void WriteCsv(
         case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      value = static_cast<double>(*reinterpret_cast<const int64_t*> (data)); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  value = static_cast<double>(*reinterpret_cast<const float*>   (data)); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: value = static_cast<double>(*reinterpret_cast<const double*>  (data)); break;
-        // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16
+        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    value = static_cast<double>(*reinterpret_cast<const float16*> (data)); break;
         default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
         }
 

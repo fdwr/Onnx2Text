@@ -25,6 +25,10 @@ Win32_Debug/
 Win32_Release/
 x64_Debug/
 x64_Release/
+bin_Win32_Debug/
+bin_Win32_Release/
+bin_x64_Debug/
+bin_x64_Release/
 bld/
 [Bb]in/
 [Oo]bj/
