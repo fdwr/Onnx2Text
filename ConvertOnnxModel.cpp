@@ -240,6 +240,56 @@ size_t GetDataTypeElementByteSize(onnx::TensorProto::DataType dataType)
     }
 }
 
+union CsvValueUnion
+{
+    double floatValue;
+    int64_t intValue;
+    uint64_t uintValue;
+};
+
+enum class CsvValueNumberClass
+{
+    Int,
+    Uint,
+    Float,
+    Hex,
+};
+
+//    ValueNumberClass valueNumberClass = ValueNumberClass::Uint;
+CsvValueNumberClass GetCsvValueNumberClass(
+    onnx::TensorProto::DataType dataType,
+    bool shouldPrintRawBytes
+    )
+{
+    CsvValueNumberClass valueNumberClass = CsvValueNumberClass::Uint;
+    switch (dataType)
+    {
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       valueNumberClass = CsvValueNumberClass::Uint ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      valueNumberClass = CsvValueNumberClass::Uint ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     valueNumberClass = CsvValueNumberClass::Uint ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     valueNumberClass = CsvValueNumberClass::Uint ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     valueNumberClass = CsvValueNumberClass::Uint ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       valueNumberClass = CsvValueNumberClass::Int  ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      valueNumberClass = CsvValueNumberClass::Int  ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      valueNumberClass = CsvValueNumberClass::Int  ; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      valueNumberClass = CsvValueNumberClass::Int  ; break;
+    default: throw std::ios::failure("Unsupported data type in tensor for CSV output.");
+    }
+
+    // For printing raw hex, always print as hex digits regardless of actual data type.
+    if (shouldPrintRawBytes)
+    {
+        valueNumberClass = CsvValueNumberClass::Hex;
+    }
+
+    return valueNumberClass;
+}
+
 void ReadCsv(
     span<const char> text,
     onnx::TensorProto::DataType dataType,
@@ -258,6 +308,8 @@ void ReadCsv(
     uint32_t row = 1, column = 1;
 
     std::string unquotedText;
+
+    CsvValueNumberClass valueNumberClass = GetCsvValueNumberClass(dataType, /*shouldPrintRawBytes*/ false);
 
     constexpr char quote = '\"';
 
@@ -298,31 +350,76 @@ void ReadCsv(
         // Write the value to the byte buffer.
         if (rowRange.Contains(row) && columnRange.Contains(column))
         {
+            CsvValueUnion value = {};
+
             // Read the numeric value.
+            bool shouldReadRawBytes = false;
             char* numberEnd;
-            double value = strtod(numberStart, &numberEnd);
+            if (numberStart[0] == '0' && numberStart[1] == 'x')
+            {
+                shouldReadRawBytes = true;
+                value.uintValue = strtoull(numberStart, &numberEnd, 16);
+            }
+            else
+            {
+                switch (valueNumberClass)
+                {
+                case CsvValueNumberClass::Int:   value.uintValue  = strtoll(numberStart, &numberEnd, 10);  break;
+                case CsvValueNumberClass::Uint:  value.uintValue  = strtoull(numberStart, &numberEnd, 10); break;
+                case CsvValueNumberClass::Float: value.floatValue = strtod(numberStart, &numberEnd);       break;
+                case CsvValueNumberClass::Hex:   value.uintValue  = strtoull(numberStart, &numberEnd, 16); break;
+                }
+            }
 
             byteData.resize(byteDataSize + elementByteSize);
             void* data = &byteData[byteDataSize];
             byteDataSize += elementByteSize;
 
-            switch (dataType)
+            if (shouldReadRawBytes)
             {
-            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      *reinterpret_cast<float*>   (data) = static_cast<float>   (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     *reinterpret_cast<double*>  (data) = static_cast<double>  (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       *reinterpret_cast<bool*>    (data) = static_cast<bool>    (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      *reinterpret_cast<uint8_t*> (data) = static_cast<uint8_t> (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       *reinterpret_cast<int8_t*>  (data) = static_cast<int8_t>  (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      *reinterpret_cast<int16_t*> (data) = static_cast<int16_t> (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     *reinterpret_cast<uint32_t*>(data) = static_cast<uint32_t>(value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      *reinterpret_cast<int32_t*> (data) = static_cast<int32_t> (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     *reinterpret_cast<uint64_t*>(data) = static_cast<uint64_t>(value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      *reinterpret_cast<int64_t*> (data) = static_cast<int64_t> (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: *reinterpret_cast<double*>  (data) = static_cast<double>  (value); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value); break;
-            default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
+                switch (dataType)
+                {
+                case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT8:
+                    *reinterpret_cast<uint8_t*> (data) = static_cast<uint8_t>(value.uintValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT16:
+                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:
+                    *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value.uintValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT32:
+                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:
+                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:
+                    *reinterpret_cast<uint32_t*>(data) = static_cast<uint32_t>(value.uintValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT64:
+                case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:
+                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128:
+                    *reinterpret_cast<uint64_t*>(data) = static_cast<uint64_t>(value.uintValue); break;
+                default: throw std::ios::failure("Unsupported data type in tensor for CSV input.");
+                }
+            }
+            else
+            {
+                switch (dataType)
+                {
+                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value.floatValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       *reinterpret_cast<bool*>    (data) = static_cast<bool>    (value.uintValue ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      *reinterpret_cast<uint8_t*> (data) = static_cast<uint8_t> (value.uintValue ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value.uintValue ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     *reinterpret_cast<uint32_t*>(data) = static_cast<uint32_t>(value.uintValue ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     *reinterpret_cast<uint64_t*>(data) = static_cast<uint64_t>(value.uintValue ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       *reinterpret_cast<int8_t*>  (data) = static_cast<int8_t>  (value.intValue  ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      *reinterpret_cast<int16_t*> (data) = static_cast<int16_t> (value.intValue  ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      *reinterpret_cast<int32_t*> (data) = static_cast<int32_t> (value.intValue  ); break;
+                case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      *reinterpret_cast<int64_t*> (data) = static_cast<int64_t> (value.intValue  ); break;
+                default: throw std::ios::failure("Unsupported data type in tensor for CSV input.");
+                }
             }
         }
 
@@ -374,6 +471,7 @@ void ReadCsv(span<const char> text, /*out*/std::vector<int32_t>& values)
 void WriteCsv(
     /*out*/span<char const> byteData,
     onnx::TensorProto::DataType dataType,
+    bool shouldPrintRawBytes,
     /*out*/std::string& text
     )
 {
@@ -387,36 +485,75 @@ void WriteCsv(
     // Round off any potential padding.
     byteData = span<char const>(byteData.data(), (byteData.size() / elementByteSize) * elementByteSize);
 
+    CsvValueNumberClass valueNumberClass = GetCsvValueNumberClass(dataType, shouldPrintRawBytes);
+
     char const* begin = byteData.data();
     char const* end = byteData.data() + byteData.size();
+
+    CsvValueUnion value;
+
     while (begin != end)
     {
         // Read the next value from the type buffer.
-        double value;
+        value = {};
         void const* data = begin;
         begin += elementByteSize;
 
-        switch (dataType)
+        if (shouldPrintRawBytes)
         {
-        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      value = static_cast<double>(*reinterpret_cast<const float*>   (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     value = static_cast<double>(*reinterpret_cast<const double*>  (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       value = static_cast<double>(*reinterpret_cast<const bool*>    (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      value = static_cast<double>(*reinterpret_cast<const uint8_t*> (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       value = static_cast<double>(*reinterpret_cast<const int8_t*>  (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     value = static_cast<double>(*reinterpret_cast<const uint16_t*>(data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      value = static_cast<double>(*reinterpret_cast<const int16_t*> (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     value = static_cast<double>(*reinterpret_cast<const uint32_t*>(data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      value = static_cast<double>(*reinterpret_cast<const int32_t*> (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     value = static_cast<double>(*reinterpret_cast<const uint64_t*>(data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      value = static_cast<double>(*reinterpret_cast<const int64_t*> (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  value = static_cast<double>(*reinterpret_cast<const float*>   (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: value = static_cast<double>(*reinterpret_cast<const double*>  (data)); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    value = static_cast<double>(*reinterpret_cast<const float16*> (data)); break;
-        default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
+            switch (dataType)
+            {
+            case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT8:
+                value.uintValue = *reinterpret_cast<const uint8_t*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT16:
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:
+                value.uintValue = *reinterpret_cast<const uint16_t*>(data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT32:
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:
+            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:
+                value.uintValue = *reinterpret_cast<const uint32_t*>(data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT64:
+            case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:
+            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128:
+                value.uintValue = *reinterpret_cast<const uint64_t*>(data); break;
+            default: throw std::ios::failure("Unsupported data type in tensor for CSV output.");
+            }
+        }
+        else
+        {
+            switch (dataType)
+            {
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      value.floatValue = *reinterpret_cast<const float*>   (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     value.floatValue = *reinterpret_cast<const double*>  (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       value.uintValue  = *reinterpret_cast<const bool*>    (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      value.uintValue  = *reinterpret_cast<const uint8_t*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       value.intValue   = *reinterpret_cast<const int8_t*>  (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     value.uintValue  = *reinterpret_cast<const uint16_t*>(data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      value.intValue   = *reinterpret_cast<const int16_t*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     value.uintValue  = *reinterpret_cast<const uint32_t*>(data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      value.intValue   = *reinterpret_cast<const int32_t*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     value.uintValue  = *reinterpret_cast<const uint64_t*>(data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      value.intValue   = *reinterpret_cast<const int64_t*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  value.floatValue = *reinterpret_cast<const float*>   (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: value.floatValue = *reinterpret_cast<const double*>  (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    value.floatValue = *reinterpret_cast<const float16*> (data); break;
+            default: throw std::ios::failure("Unsupported data type in tensor for CSV output.");
+            }
         }
 
-        // Write the next value as value.
-        sprintf_s(buffer, "%g", value);
+        switch (valueNumberClass)
+        {
+        case CsvValueNumberClass::Int:   sprintf_s(buffer, "%lld",   value.intValue);   break;
+        case CsvValueNumberClass::Uint:  sprintf_s(buffer, "%llu",   value.uintValue);  break;
+        case CsvValueNumberClass::Float: sprintf_s(buffer, "%g",     value.floatValue); break;
+        case CsvValueNumberClass::Hex:   sprintf_s(buffer, "0x%llX", value.uintValue);  break;
+        }
+
         text.append(buffer);
         if (begin != end)
         {
@@ -1103,6 +1240,7 @@ void ConvertTensor(
     HalfOpenRangeUint32 columnRange,        // matters for CSV files
     std::string_view pixelFormatString,     // matters for image files
     std::string_view channelLayoutString,   // matters for image files
+    bool shouldPrintRawBytes,               // for printing CSV
     _In_z_ wchar_t const* outputFilename
     )
 {
@@ -1199,7 +1337,12 @@ void ConvertTensor(
     // Print details.
     {
         std::string dimensionsText;
-        WriteCsv(reinterpret_span<char const>(resolvedDimensions), onnx::TensorProto::DataType::TensorProto_DataType_INT32, /*out*/ dimensionsText);
+        WriteCsv(
+            reinterpret_span<char const>(resolvedDimensions),
+            onnx::TensorProto::DataType::TensorProto_DataType_INT32,
+            /*shouldPrintRawBytes*/ false,
+            /*out*/ dimensionsText
+        );
         printf("Tensor data type: %s, Dimensions: %s\r\n", GetStringNameFromDataType(dataType).data(), dimensionsText.c_str());
     }
 
@@ -1226,7 +1369,7 @@ void ConvertTensor(
     {
         std::string byteData = GetOnnxTensorRawByteData(tensor);
         std::string text;
-        WriteCsv(byteData, onnx::TensorProto::DataType(tensor.data_type()), /*out*/ text);
+        WriteCsv(byteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
         WriteBinaryFile(outputFilename, text);
     }
     else if (outputFileExtensionType == FileExtensionType::Image)
@@ -1278,6 +1421,7 @@ void PrintUsage()
                  "                 1D element count from source data.\r\n"
                  "      -datatype: tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
                  "                 uint16,int32,uint32,int64,uint64,bool8,complex64,complex128).\r\n"
+                 "        -rawhex: display as raw hexadecimal when writing .csv\r\n"
                  "           -row: single row or range for .csv.\r\n"
                  "        -column: single column or range for .csv.\r\n"
                  ;
@@ -1337,6 +1481,7 @@ int Main(int argc, wchar_t** argv)
     std::vector<int32_t> dimensions;
     onnx::TensorProto::DataType dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     HalfOpenRangeUint32 rowRange = {}, columnRange = {};
+    bool shouldPrintRawBytes = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -1388,6 +1533,10 @@ int Main(int argc, wchar_t** argv)
                 }
                 std::string s = g_converterToUtf8.to_bytes(argv[i]);
                 ReadOpenHalfRange(s, /*out*/ columnRange);
+            }
+            else if (argument == L"-rawhex")
+            {
+                shouldPrintRawBytes = true;
             }
             else
             {
@@ -1456,6 +1605,7 @@ int Main(int argc, wchar_t** argv)
             columnRange,
             pixelFormatString,
             channelLayoutString,
+            shouldPrintRawBytes,
             outputFilename.c_str()
         );
     }
