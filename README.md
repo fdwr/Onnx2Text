@@ -2,7 +2,7 @@ ConvertOnnxModel
 2018-07-19..2020-02-13  
 Dwayne Robinson (FDwR)  
 
-Converts a binary ONNX model file to text (which can be edited in any simple text editor) and vice versa.
+Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
 Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
 
 # Usage
@@ -17,7 +17,7 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
     ConvertOnnxModel.exe -tensor file.pb file.png // Tensor protobuf to PNG image
     ConvertOnnxModel.exe -tensor file.png file.pb // PNG image to tensor protobuf
     ConvertOnnxModel.exe -tensor -dimensions 3,480,640 file.csv file.png // CSV to PNG with dimensions
-    ConvertOnnxModel.exe -tensor -datatype float64 con.csv foo.dat // CSV file to raw data array
+    ConvertOnnxModel.exe -tensor -datatype float64 food.csv foo.dat // CSV file to raw data array
     ConvertOnnxModel.exe -tensor -datatype uint16 foo.dat con.csv // raw data array to CSV file
 
 # Parameters
@@ -39,7 +39,7 @@ csv/dat).
 * .dat/.bin - Raw binary data.
 
 # Building
-Load Visual Studio solution, and build.
+Load Visual Studio solution (ConvertOnnxModel.sln), and build.
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
