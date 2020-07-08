@@ -148,6 +148,25 @@ span<NewType> reinterpret_span(OldTypeContainer& oldSpan)
     return span<NewType>(p, p + newElementCount);
 }
 
+template <typename ContainerType>
+auto clamped_span(ContainerType& oldSpan, size_t offset, size_t count) -> span<decltype(*oldSpan.data())>
+{
+    size_t endOffset = offset + count;
+    size_t maxOffset = oldSpan.size();
+    beginOffset = std::min(offset, maxOffset);
+    endOffset = (endOffset > maxOffset || endOffset < offset) ? maxOffset : endOffset;
+
+    auto* p = oldSpan.data();
+    return span<NewType>(p + beginOffset, p + endOffset);
+}
+
+// Why? How? How are basic functions like this missing from the standard library?
+template <typename ContainerType1, typename ContainerType2>
+bool equals(ContainerType1&& c1, ContainerType2&& c2)
+{
+    return std::equal(c1.begin(), c1.end(), c2.begin(), c2.end());
+}
+
 std::string ReadTextFile(wchar_t const* inputFilename)
 {
     std::string fileData;
@@ -202,6 +221,8 @@ enum class FileExtensionType
     CommaSeparatedValue, // .csv
     Image,               // .png / .jpg
     RawData,             // .dat / .bin - raw binary, dump of tensor values as-is
+    NumPyArray,          // .npy (not .npz zip files with multiple arrays in them)
+    OnnxTensor,          // .onnxtensor
 };
 
 FileExtensionType GetFileExtensionType(std::wstring_view filename)
@@ -216,6 +237,8 @@ FileExtensionType GetFileExtensionType(std::wstring_view filename)
     if (filenameExtension == L"png" ) return FileExtensionType::Image;
     if (filenameExtension == L"jpg" ) return FileExtensionType::Image;
     if (filenameExtension == L"jpeg") return FileExtensionType::Image;
+    if (filenameExtension == L"npy")  return FileExtensionType::NumPyArray;
+    if (filenameExtension == L"onnxtensor") return FileExtensionType::OnnxTensor;
     return FileExtensionType::Unknown;
 }
 
@@ -469,10 +492,11 @@ void ReadCsv(span<const char> text, /*out*/std::vector<int32_t>& values)
     }
 }
 
+// Writes tensor data to a string (not directly to a file).
 void WriteCsv(
     /*out*/span<char const> byteData,
     onnx::TensorProto::DataType dataType,
-    bool shouldPrintRawBytes,
+    bool shouldPrintRawBytes, // Print raw hex bit values instead of formatted numbers.
     /*out*/std::string& text
     )
 {
@@ -569,9 +593,9 @@ std::vector<int32_t> ResolveEmptyDimensions(
     onnx::TensorProto::DataType dataType
     )
 {
+    // Return a 1D array if no dimensions were given, equal to the element count.
     std::vector<int32_t> resolvedDimensions(defaultDimensions.begin(), defaultDimensions.end());
 
-    // Use a 1D array equal to the element count if no dimensions were given.
     if (resolvedDimensions.empty())
     {
         size_t elementByteSize = GetDataTypeElementByteSize(dataType);
@@ -580,6 +604,52 @@ std::vector<int32_t> ResolveEmptyDimensions(
     }
 
     return resolvedDimensions;
+}
+
+void ReadNpy(
+    span<const char> fileData,
+    /*out*/onnx::TensorProto::DataType& dataType,
+    /*out*/std::vector<int32_t>& dimensions,
+    /*out*/std::vector<char>& byteData
+    )
+{
+    throw std::runtime_error("NumPy Array reading not implemented.");
+
+#if 0
+    byteData.clear();
+
+    // Check signature.
+    if (!equals(clamped_span(fileData, 0, 8), std::string_view("x93NUMPY")))
+    {
+        throw std::ios::failure("NumPy array header signature is invalid.");
+    }
+
+    // TODO
+    // Read major, minor version
+    // Read header length
+    // Read dictionary
+
+#endif
+}
+
+// Writes tensor data to in memory file data (not directly to file).
+void WriteNpy(
+    /*out*/span<char const> byteData,
+    onnx::TensorProto::DataType dataType,
+    /*out*/span<int32_t> dimensions,
+    /*out*/std::string& fileData
+    )
+{
+    throw std::runtime_error("NumPy Array writing not implemented.");
+
+#if 0
+    fileData.clear();
+
+    // TODO
+    // Write signature
+    // Write dictionary
+    // {'descr': '<i4', 'fortran_order': False, 'shape': (10,), }
+#endif
 }
 
 void ConvertModel(
@@ -635,6 +705,16 @@ void ConvertModel(
         std::ofstream os(outputFilename, std::ios::binary);
         succeeded = model.SerializeToOstream(&os);
     }
+#if 0
+    else if (outputFileExtensionType == FileExtensionType::NumPyArray
+          || outputFileExtensionType == FileExtensionType::OnnxTensor)
+    {
+        // TODO:::
+        // enumerate all the tensor initializers, and dump their contents.
+        //std::ofstream os(outputFilename, std::ios::binary);
+        //succeeded = model.SerializeToOstream(&os);
+    }
+#endif
     else
     {
         throw std::invalid_argument("Unknown output graph file extension.");
@@ -1267,6 +1347,8 @@ void ConvertTensor(
         if (inputFileExtensionType == FileExtensionType::Text
         ||  inputFileExtensionType == FileExtensionType::OnnxModel
         ||  inputFileExtensionType == FileExtensionType::GoogleProtobuf
+        ||  inputFileExtensionType == FileExtensionType::OnnxTensor
+        ||  inputFileExtensionType == FileExtensionType::NumPyArray
         ||  inputFileExtensionType == FileExtensionType::Image)
         {
             throw std::invalid_argument("\"dimensions\" are invalid when reading from this file type.");
@@ -1279,7 +1361,7 @@ void ConvertTensor(
         std::string modelString = ReadTextFile(inputFilename);
         succeeded = google::protobuf::TextFormat::ParseFromString(modelString, &tensor);
     }
-    else if (inputFileExtensionType == FileExtensionType::OnnxModel
+    else if (inputFileExtensionType == FileExtensionType::OnnxTensor
           || inputFileExtensionType == FileExtensionType::GoogleProtobuf)
     {
         std::ifstream ifs(inputFilename, std::ios::binary);
@@ -1287,19 +1369,27 @@ void ConvertTensor(
     }
     else if (inputFileExtensionType == FileExtensionType::RawData)
     {
-        std::string byteData = ReadTextFile(inputFilename);
-        resolvedDimensions = ResolveEmptyDimensions(dimensions, byteData, dataType);
+        std::string arrayByteData = ReadTextFile(inputFilename);
+        resolvedDimensions = ResolveEmptyDimensions(dimensions, arrayByteData, dataType);
 
-        MakeTensor(byteData, dataType, resolvedDimensions, "", /*out*/ tensor);
+        MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
     else if (inputFileExtensionType == FileExtensionType::CommaSeparatedValue)
     {
         std::string text = ReadTextFile(inputFilename);
-        std::vector<char> byteData;
-        resolvedDimensions = ResolveEmptyDimensions(dimensions, byteData, dataType);
+        std::vector<char> arrayByteData;
+        resolvedDimensions = ResolveEmptyDimensions(dimensions, /*out*/ arrayByteData, dataType);
 
-        ReadCsv(/*out*/ text, dataType, rowRange, columnRange, /*out*/ byteData);
-        MakeTensor(byteData, dataType, resolvedDimensions, "", /*out*/ tensor);
+        ReadCsv(text, dataType, rowRange, columnRange, /*out*/ arrayByteData);
+        MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
+    }
+    else if (inputFileExtensionType == FileExtensionType::NumPyArray)
+    {
+        std::string fileData = ReadTextFile(inputFilename);
+        std::vector<char> arrayByteData;
+
+        ReadNpy(fileData, /*out*/ dataType, /*out*/ resolvedDimensions, /*out*/ arrayByteData);
+        MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
     else if (inputFileExtensionType == FileExtensionType::Image)
     {
@@ -1355,7 +1445,7 @@ void ConvertTensor(
             WriteBinaryFile(outputFilename, modelString);
         }
     }
-    else if (outputFileExtensionType == FileExtensionType::OnnxModel
+    else if (outputFileExtensionType == FileExtensionType::OnnxTensor
           || outputFileExtensionType == FileExtensionType::GoogleProtobuf)
     {
         std::ofstream os(outputFilename, std::ios::binary);
@@ -1363,20 +1453,27 @@ void ConvertTensor(
     }
     else if (outputFileExtensionType == FileExtensionType::RawData)
     {
-        std::string byteData = GetOnnxTensorRawByteData(tensor);
-        WriteBinaryFile(outputFilename, byteData);
+        std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
+        WriteBinaryFile(outputFilename, arrayByteData);
     }
     else if (outputFileExtensionType == FileExtensionType::CommaSeparatedValue)
     {
-        std::string byteData = GetOnnxTensorRawByteData(tensor);
+        std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
         std::string text;
-        WriteCsv(byteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
+        WriteCsv(arrayByteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
         WriteBinaryFile(outputFilename, text);
+    }
+    else if (outputFileExtensionType == FileExtensionType::NumPyArray)
+    {
+        std::string fileData;
+        std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
+        WriteNpy(arrayByteData, tensor.data_type(), resolvedDimensions, /*out*/ fileData);
+        WriteBinaryFile(outputFilename, fileData);
     }
     else if (outputFileExtensionType == FileExtensionType::Image)
     {
-        std::string byteData = GetOnnxTensorRawByteData(tensor);
-        std::vector<uint8_t> pixelBytes(byteData.data(), byteData.data() + byteData.size());
+        std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
+        std::vector<uint8_t> pixelBytes(arrayByteData.data(), arrayByteData.data() + arrayByteData.size());
         RearrangeChannels(
             dataType,
             resolvedDimensions,
@@ -1470,6 +1567,8 @@ ConversionMode GetConversionModeFromFileExtensionType(FileExtensionType fileExte
     case FileExtensionType::CommaSeparatedValue: return ConversionMode::Tensor;
     case FileExtensionType::Image: return ConversionMode::Tensor;
     case FileExtensionType::RawData: return ConversionMode::Unknown;
+    case FileExtensionType::OnnxTensor: return ConversionMode::Tensor;
+    case FileExtensionType::NumPyArray: return ConversionMode::Tensor;
     }
     return ConversionMode::Unknown;
 }
