@@ -45,11 +45,16 @@ Load Visual Studio solution (ConvertOnnxModel.sln), and build.
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
 the executable. If you need a different configuration:
 
-Download/clone: https://github.com/protocolbuffers/protobuf/releases/tag/v3.5.1
+Download/clone:
+https://github.com/protocolbuffers/protobuf/releases/tag/v3.5.1
+or `git clone -b v3.5.1 https://github.com/google/protobuf.git`
 
+    md protobuf-3.5.1\cmake\build\solution\
     cd protobuf-3.5.1\cmake\build\solution\
     cmake -G "Visual Studio 15 2017" -DCMAKE_INSTALL_PREFIX=../../../../install ../.. -Dprotobuf_BUILD_TESTS=OFF
+    #cmake -G "Visual Studio 15 2017" -DCMAKE_INSTALL_PREFIX=../../../../install ../.. -Dprotobuf_BUILD_TESTS=OFF -Ax64
     start protobuf-3.5.1\cmake\build\solution\protobuf.sln
+    # Build it
 
 Build libprotobuf.vcxproj project. Find the .lib files under protobuf-3.5.1\cmake\build\solution\*.
 
