@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <numeric>
+#include <codecvt>
 
 #pragma warning(push)
 #pragma warning(disable: 4146)
@@ -170,16 +171,16 @@ std::string ReadTextFile(wchar_t const* inputFilename)
 void WriteBinaryFile(wchar_t const* outputFilename, span<const char> fileData)
 {
     // Create any intermediate output path needed.
-    std::experimental::filesystem::path path(outputFilename);
+    std::filesystem::path path(outputFilename);
     if (path.has_parent_path())
     {
         path.remove_filename();
         // .filename() lies when referring to the root directory, saying there is a filename when
         // there actually is not. So instead we check whether the current path equals the root.
-        std::experimental::filesystem::path root = path.root_path();
+        std::filesystem::path root = path.root_path();
         if (path != root)
         {
-            std::experimental::filesystem::create_directory(path);
+            std::filesystem::create_directory(path);
         }
     }
 
