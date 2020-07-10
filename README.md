@@ -23,7 +23,7 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
     ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy // dump graph to tensors
 
 # Parameters
-* input/output files: graph (onnx/pb/text) or tensor (pb/text/csv/dat).
+* input/output files: graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
 * -tensor: convert tensor instead of graph.
 * -graph: convert graph (default).
 * -dimensions: explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data.
