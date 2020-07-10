@@ -9,8 +9,8 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
     ConvertOnnxModel.exe [options] inputFilename [outputFilename]
 
 # Example usage
-    ConvertOnnxModel.exe Foo.onnx Foo.txt // ONNX model binary file to text representation
-    ConvertOnnxModel.exe Foo.txt Foo.onnx // ONNX model text representation to binary file
+    ConvertOnnxModel.exe input.onnx output.txt // ONNX model binary file to text representation
+    ConvertOnnxModel.exe input.txt output.onnx // ONNX model text representation to binary file
     ConvertOnnxModel.exe -tensor Foo.pb Foo.csv // Tensor protobuf file to comma separated values
     ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat
     ConvertOnnxModel.exe -tensor file.pb file.txt // Tensor brotobuf to text
@@ -18,7 +18,9 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
     ConvertOnnxModel.exe -tensor file.png file.pb // PNG image to tensor protobuf
     ConvertOnnxModel.exe -tensor -dimensions 3,480,640 file.csv file.png // CSV to PNG with dimensions
     ConvertOnnxModel.exe -tensor -datatype float64 food.csv foo.dat // CSV file to raw data array
-    ConvertOnnxModel.exe -tensor -datatype uint16 foo.dat con.csv // raw data array to CSV file
+    ConvertOnnxModel.exe -tensor -datatype uint16 foo.dat con.csv // raw data array to CSV screen
+    ConvertOnnxModel.exe input.npy output.onnxtensor // NumPy array to ONNX tensor
+    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy // dump graph to tensors
 
 # Parameters
 * input/output files: graph (onnx/pb/text) or tensor (pb/text/csv/dat).
@@ -31,8 +33,10 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
 
 # File Types
 * .onnx - Open Neural Network Exchange model/graph binary file.
+* .onnxtensor - ONNX tensor as binary Google protobuf file.
 * .txt - Open Neural Network Exchange model/graph text file.
 * .pb - Protobuf binary file, either tensor or graph (depending on -tensor or -graph). The dimensions are data type are contained in the file.
+* .npy - NumPy NEP array format for numpy.load().
 * .csv - Comma separated value. Contain raw values, no dimensions. The dimensions should be specified if input.
 csv/dat).
 * .png - Portable Network Graphics image file.
