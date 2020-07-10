@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <numeric>
 #include <codecvt>
+#include <charconv>
 
 #pragma warning(push)
 #pragma warning(disable: 4146)
@@ -95,12 +96,42 @@ public:
     size_t size() const noexcept { return end_ - begin_; }
     size_t size_bytes() const noexcept { return sizeof(T) * size(); }
     T& operator[](size_t index) const noexcept { return begin_[index]; }
-    span<T> subspan(size_t index, size_t count) { return span<T>(begin_ + index, begin_ + index + count); }
+    span<T> subspan(size_t index, size_t count) const noexcept { return span<T>(begin_ + index, begin_ + index + count); }
+    span<T> subrange(size_t begin, size_t end) const noexcept { return span<T>(begin_ + begin, begin_ + end); }
+    span<T> first(size_t count) const noexcept { return span<T>(begin_, begin_ + count); }
+    span<T> last(size_t count) const noexcept { return span<T>(end_ - count, end_); }
+
+    T& front() noexcept { return *begin_; }
+    T& back()  noexcept { return *end_; }
+    T const& front() const noexcept { return *begin_; }
+    T const& back()  const noexcept { return *end_; }
+    T consume_front() noexcept { return *begin_++; }
+    T consume_back()  noexcept { return *--end_; }
+    void pop_front() noexcept { ++begin_; }
+    void pop_back()  noexcept { --end_; }
 
 protected:
     T* begin_ = nullptr;
     T* end_ = nullptr;
 };
+
+template<typename T>
+span<const std::byte> as_bytes(span<T> oldSpan)
+{
+    return span<const std::byte>(reinterpret_cast<const std::byte*>(oldSpan.data()), oldSpan.size_bytes());
+}
+
+template<typename T>
+span<std::byte> as_writeable_bytes(span<T> oldSpan)
+{
+    return span<std::byte>(reinterpret_cast<std::byte*>(oldSpan.data()), oldSpan.size_bytes());
+}
+
+template<typename T>
+span<const std::byte> struct_as_bytes(T& data)
+{
+    return span<const std::byte>(reinterpret_cast<const std::byte*>(std::addressof(data)), sizeof(data));
+}
 
 template<typename T>
 struct HalfOpenRange
@@ -158,6 +189,18 @@ auto clamped_span(ContainerType& oldSpan, size_t offset, size_t count) -> span<d
 
     auto* p = oldSpan.data();
     return span<NewType>(p + beginOffset, p + endOffset);
+}
+
+template <typename NewStructType, typename OldTypeContainer>
+const NewStructType& read_as(OldTypeContainer&& oldSpan)
+{
+    span<const std::byte> byteSpan = as_bytes(oldSpan);
+    size_t byteSize = byteSpan.size_bytes();
+    if (sizeof(NewStructType) > byteSize)
+    {
+        throw std::runtime_error("Span is too small to be cast to new data type.");
+    }
+    return *reinterpret_cast<const NewStructType*>(byteSpan.data());
 }
 
 // Why? How? How are basic functions like this missing from the standard library?
@@ -225,9 +268,17 @@ enum class FileExtensionType
     OnnxTensor,          // .onnxtensor
 };
 
+size_t GetFileExtensionOffset(std::wstring_view filename)
+{
+    size_t extensionOffset = filename.find_last_of(L".");
+    extensionOffset = (extensionOffset != std::string::npos) ? extensionOffset + 1 : filename.size();
+    return extensionOffset;
+}
+
 FileExtensionType GetFileExtensionType(std::wstring_view filename)
 {
-    std::wstring_view filenameExtension = filename.substr(filename.find_last_of(L".") + 1);
+    size_t extensionOffset = GetFileExtensionOffset(filename);
+    std::wstring_view filenameExtension = filename.substr(extensionOffset);
     if (filenameExtension == L"pb"  ) return FileExtensionType::GoogleProtobuf;
     if (filenameExtension == L"onnx") return FileExtensionType::OnnxModel;
     if (filenameExtension == L"txt" ) return FileExtensionType::Text;
@@ -606,126 +657,6 @@ std::vector<int32_t> ResolveEmptyDimensions(
     return resolvedDimensions;
 }
 
-void ReadNpy(
-    span<const char> fileData,
-    /*out*/onnx::TensorProto::DataType& dataType,
-    /*out*/std::vector<int32_t>& dimensions,
-    /*out*/std::vector<char>& byteData
-    )
-{
-    throw std::runtime_error("NumPy Array reading not implemented.");
-
-#if 0
-    byteData.clear();
-
-    // Check signature.
-    if (!equals(clamped_span(fileData, 0, 8), std::string_view("x93NUMPY")))
-    {
-        throw std::ios::failure("NumPy array header signature is invalid.");
-    }
-
-    // TODO
-    // Read major, minor version
-    // Read header length
-    // Read dictionary
-
-#endif
-}
-
-// Writes tensor data to in memory file data (not directly to file).
-void WriteNpy(
-    /*out*/span<char const> byteData,
-    onnx::TensorProto::DataType dataType,
-    /*out*/span<int32_t> dimensions,
-    /*out*/std::string& fileData
-    )
-{
-    throw std::runtime_error("NumPy Array writing not implemented.");
-
-#if 0
-    fileData.clear();
-
-    // TODO
-    // Write signature
-    // Write dictionary
-    // {'descr': '<i4', 'fortran_order': False, 'shape': (10,), }
-#endif
-}
-
-void ConvertModel(
-    _In_z_ wchar_t const* inputFilename,
-    _In_z_ wchar_t const* outputFilename
-    )
-{
-    FileExtensionType inputFileExtensionType  = GetFileExtensionType(std::wstring_view(inputFilename));
-    FileExtensionType outputFileExtensionType = GetFileExtensionType(std::wstring_view(outputFilename));
-
-    onnx::ModelProto model;
-
-    bool succeeded = false;
-    if (inputFileExtensionType == FileExtensionType::Text)
-    {
-        std::string modelString = ReadTextFile(inputFilename);
-
-        // Essentially "google::protobuf::TextFormat::ParseFromString(modelString, &model)"
-        // except that we need to pass the flag to allow field numbers.
-
-        google::protobuf::TextFormat::Parser parser;
-        parser.AllowFieldNumber(true);
-        succeeded = parser.ParseFromString(modelString, &model);
-    }
-    else if (inputFileExtensionType == FileExtensionType::OnnxModel
-          || inputFileExtensionType == FileExtensionType::GoogleProtobuf)
-    {
-        std::ifstream ifs(inputFilename, std::ios::binary);
-        succeeded = model.ParseFromIstream(&ifs);
-    }
-    else
-    {
-        throw std::invalid_argument("Unknown input graph file extension.");
-    }
-
-    if (!succeeded)
-    {
-        throw std::ios::failure("Could not parse input graph file.");
-    }
-
-    if (outputFileExtensionType == FileExtensionType::Text)
-    {
-        // Write the whole model to a text file.
-        // Use the stream instead of google::protobuf::TextFormat::PrintToString,
-        // which can fail for models that are >= 200MBs by running out of memory.
-        std::ofstream outputFile(outputFilename, std::ios::out);
-        std::unique_ptr<google::protobuf::io::ZeroCopyOutputStream> output(new google::protobuf::io::OstreamOutputStream(&outputFile));
-        succeeded = google::protobuf::TextFormat::Print(model, output.get());
-    }
-    else if (outputFileExtensionType == FileExtensionType::OnnxModel
-          || outputFileExtensionType == FileExtensionType::GoogleProtobuf)
-    {
-        std::ofstream os(outputFilename, std::ios::binary);
-        succeeded = model.SerializeToOstream(&os);
-    }
-#if 0
-    else if (outputFileExtensionType == FileExtensionType::NumPyArray
-          || outputFileExtensionType == FileExtensionType::OnnxTensor)
-    {
-        // TODO:::
-        // enumerate all the tensor initializers, and dump their contents.
-        //std::ofstream os(outputFilename, std::ios::binary);
-        //succeeded = model.SerializeToOstream(&os);
-    }
-#endif
-    else
-    {
-        throw std::invalid_argument("Unknown output graph file extension.");
-    }
-
-    if (!succeeded)
-    {
-        throw std::ios::failure("Could not serialize output graph file.");
-    }
-}
-
 uint32_t ComputeElementCount(span<int32_t const> dimensions)
 {
     return std::accumulate(dimensions.begin(), dimensions.end(), 1, std::multiplies<int32_t>());
@@ -782,6 +713,11 @@ uint32_t GetByteSizeFromDataType(onnx::TensorProto::DataType dataType) noexcept
 {
     size_t index = static_cast<size_t>(dataType);
     return g_elementDataTypeByteSizes[index < std::size(g_elementDataTypeNames) ? index : 0];
+}
+
+uint32_t GetByteSizeFromDimensions(span<int32_t const> dimensions, onnx::TensorProto::DataType dataType) noexcept
+{
+    return ComputeElementCount(dimensions) * GetByteSizeFromDataType(dataType);
 }
 
 onnx::TensorProto::DataType GetDataTypeFromStringName(std::string_view name) noexcept
@@ -903,6 +839,690 @@ void RearrangeChannels(
     pixelBytes = std::move(destinationPixelBytes);
 }
 
+void SwapBytes(span<uint8_t> arrayByteData, uint32_t elementByteSize)
+{
+    switch (elementByteSize)
+    {
+    // case 1: NOP
+
+    case 2:
+        {
+            auto s16 = reinterpret_span<uint16_t>(arrayByteData);
+            for (auto& u : s16)
+            {
+                uint32_t v = u;
+                u = ((v & 0x00FF) << 8) |
+                    ((v & 0xFF00) >> 8);
+            }
+        }
+        break;
+
+    case 4:
+    case 8:
+    case 16:
+        {
+            auto s32 = reinterpret_span<uint32_t>(arrayByteData);
+            for (auto& u : s32)
+            {
+                uint32_t v = u;
+                u = ((v & 0x000000FF) << 24) |
+                    ((v & 0x0000FF00) << 8);
+                    ((v & 0x00FF0000) >> 8);
+                    ((v & 0xFF000000) >> 24);
+            }
+
+            if (elementByteSize == 8)
+            {
+                for (uint32_t i = 0; i < static_cast<uint32_t>(s32.size() & ~0x1); i += 2)
+                {
+                    std::swap(s32[i + 0], s32[i + 1]);
+                }
+            }
+            else if (elementByteSize == 16)
+            {
+                for (uint32_t i = 0; i < static_cast<uint32_t>(s32.size() & ~0x3); i += 4)
+                {
+                    std::swap(s32[i + 0], s32[i + 3]);
+                    std::swap(s32[i + 1], s32[i + 2]);
+                }
+            }
+        }
+        break;
+    }
+}
+
+void MapNumPyArrayDataTypeToOnnx(
+    std::string_view numPyElementType,
+    /*out*/onnx::TensorProto::DataType& dataType,
+    /*out*/ bool& isBackwardsEndian // Backwards endian which stores greatest bytes at lowest bytes.
+    )
+{
+    dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
+    isBackwardsEndian = false;
+
+    onnx::TensorProto::DataType resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
+    uint32_t elementByteSize = 0;
+
+    // https://docs.python.org/2/library/array.html#module-array
+    // https://numpy.org/devdocs/reference/arrays.dtypes.html
+    for (char c : numPyElementType)
+    {
+        switch (c)
+        {
+        case '?': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_BOOL;   break; // boolean
+        case 'b': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT8;   break; // signed byte
+        case 'B': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT8;  break; // unsigned byte
+        case 'h': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT16;  break; // signed short
+        case 'H': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT16; break; // unsigned short
+        case 'i': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT32;  break; // signed integer
+        case 'u': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT32; break; // unsigned integer
+        case 'f': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_FLOAT;  break; // float
+        case 'd': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE; break; // float64
+        case '>': isBackwardsEndian = true; break;    // (backwards-endian)
+        case '<': isBackwardsEndian = false; break;   // (logical-endian)
+
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+            elementByteSize = elementByteSize * 10 + c - '0';
+            break;
+
+        default:
+            assert(false);
+            resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
+            break;
+        }
+    }
+
+    if (elementByteSize > 0)
+    {
+        switch (resolvedDataType)
+        {
+        case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:
+            switch (elementByteSize)
+            {
+            case 1: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT8; break;
+            case 2: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT16; break;
+            case 4: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT32; break;
+            case 8: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT64; break;
+            default: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED; break;
+            }
+            break;
+
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT8:
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT16:
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT32:
+            switch (elementByteSize)
+            {
+            case 1: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT8; break;
+            case 2: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT16; break;
+            case 4: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT32; break;
+            case 8: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_INT64; break;
+            default: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED; break;
+            }
+            break;
+
+        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:
+        case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:
+            switch (elementByteSize)
+            {
+            case 2: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16; break;
+            case 4: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_FLOAT; break;
+            case 8: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE; break;
+            default: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED; break;
+            }
+            break;
+        }
+    }
+
+    dataType = resolvedDataType;
+}
+
+void MapOnnxDataTypeToNumPyArray(
+    onnx::TensorProto::DataType dataType,
+    bool isBackwardsEndian, // Backwards endian which stores greatest bytes at lowest bytes.
+    /*out*/ std::string& numPyElementType
+    )
+{
+    numPyElementType.push_back(isBackwardsEndian ? '>' : '<');
+
+    // https://docs.python.org/2/library/array.html#module-array
+    // https://numpy.org/devdocs/reference/arrays.dtypes.html
+    std::string_view characterCode;
+    switch (dataType)
+    {
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:    characterCode = "?"   /*'?'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:    characterCode = "i1"  /*'b'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:   characterCode = "u1"  /*'B'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:   characterCode = "i2" /*'h'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:   characterCode = "i4" /*'i'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:   characterCode = "i8" /*'i'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:  characterCode = "u2" /*'H'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:  characterCode = "u4" /*'u'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:  characterCode = "u8" /*'u'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16: characterCode = "f2" /*'f'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:   characterCode = "f4" /*'f'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:  characterCode = "f8" /*'d'*/; break;
+    default: characterCode = "?";  assert(false);
+    }
+    numPyElementType.append(characterCode);
+}
+
+class PythonDictionaryLexer
+{
+public:
+    enum class TokenType
+    {
+        Error,
+        End,
+        OpeningBrace,
+        ClosingBrace,
+        OpeningParenthesis,
+        ClosingParenthesis,
+        Identifier,
+        String,
+        Colon,
+        Comma,
+        Number,
+    };
+
+    PythonDictionaryLexer(span<const char> text) : text_(text)
+    {
+    }
+
+    PythonDictionaryLexer(std::string_view text) : text_(text.data(), text.data() + text.size())
+    {
+    }
+
+    bool empty()
+    {
+        return text_.empty();
+    }
+
+    struct { span<const char> token; TokenType tokenType; } Read()
+    {
+        span<const char> token;
+        TokenType tokenType = TokenType::End;
+
+        // Skip spaces.
+        for (; !text_.empty() && isspace(text_.front()); text_.pop_front())
+        {
+        }
+
+        if (!text_.empty())
+        {
+            token = text_.subspan(0, 1);
+            char ch = text_.consume_front();
+
+            switch (ch)
+            {
+            case '{': tokenType = TokenType::OpeningBrace; break;
+            case '}': tokenType = TokenType::ClosingBrace; break;
+            case '(': tokenType = TokenType::OpeningParenthesis; break;
+            case ')': tokenType = TokenType::ClosingParenthesis; break;
+            case ':': tokenType = TokenType::Colon; break;
+            case ',': tokenType = TokenType::Comma; break;
+            case '\'':
+            case '\"':
+                {
+                    tokenType = TokenType::String;
+                    char leadingQuoteMark = ch;
+                    ch = 0;
+                    token.pop_front(); // Skip leading quote.
+
+                    // Read until the closing quote mark.
+                    for (; !text_.empty() && (ch = text_.front(), ch != leadingQuoteMark && ch != '\r' && ch != '\n'); text_.pop_front())
+                    {
+                    }
+                    token = {token.begin(), text_.begin()};
+
+                    if (ch == leadingQuoteMark)
+                    {
+                        text_.pop_front(); // Skip closing quote mark.
+                    }
+                    else
+                    {
+                        tokenType = TokenType::Error; // Unclosed string.
+                    }
+                }
+                break;
+
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9':
+                tokenType = TokenType::Number;
+                for (; !text_.empty() && (ch = text_.front(), isdigit(ch) || ch == '.'); text_.pop_front())
+                {
+                }
+                token = {token.begin(), text_.begin()};
+                break;
+
+            default:
+                // Check alphanumeric identifier.
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+                {
+                    tokenType = TokenType::Identifier;
+                    for (; !text_.empty() && (ch = text_.front(), isalnum(ch) || ch == '.'); text_.pop_front())
+                    {
+                    }
+                    token = {token.begin(), text_.begin()};
+                }
+                else
+                {
+                    tokenType = TokenType::Error;
+                }
+            }
+        }
+
+        return { token, tokenType };
+    }
+
+    std::map<std::string_view, std::string_view> ReadDictionary()
+    {
+        int indentLevel = 0;
+
+        std::map<std::string_view, std::string_view> map;
+        std::string_view currentKey;
+        std::string_view currentValue;
+        bool haveKey = false;
+
+        auto appendCurrentKeyValue = [&]()
+        {
+            if (haveKey)
+            {
+                map.insert({currentKey, currentValue});
+                currentKey = {};
+                currentValue = {};
+            }
+            haveKey = false;
+        };
+
+        while (true)
+        {
+            auto [token, tokenType] = Read();
+
+            bool extendToken = false;
+            switch (tokenType)
+            {
+            case TokenType::Error: goto End;
+            case TokenType::End: goto End;
+            case TokenType::OpeningParenthesis: ++indentLevel; break;
+            case TokenType::ClosingParenthesis: --indentLevel; extendToken = (indentLevel == 1); break;
+            case TokenType::OpeningBrace: ++indentLevel; break;
+            case TokenType::ClosingBrace: --indentLevel; extendToken = (indentLevel == 1); break;
+
+            case TokenType::Comma:
+                if (indentLevel == 1)
+                {
+                    appendCurrentKeyValue();
+                }
+                break;
+
+            case TokenType::Colon:
+                if (indentLevel == 1)
+                {
+                    haveKey = true;
+                }
+                break;
+
+            default:
+                extendToken = true;
+                break;
+            }
+
+            // Glom multiple tokens together into a larger unit.
+            if (indentLevel > 1 || extendToken)
+            {
+                auto& keyOrValue = (haveKey) ? currentValue : currentKey;
+                if (keyOrValue.empty())
+                {
+                    keyOrValue = { token.data(), token.size() };
+                }
+                else
+                {
+                    keyOrValue = {keyOrValue.data(), size_t(token.end() - keyOrValue.data()) };
+                }
+            }
+        }
+    End:
+
+        appendCurrentKeyValue();
+
+        assert(indentLevel == 0);
+
+        return map;
+    }
+
+    void ParseIntegers(/*out*/ std::vector<int32_t>& numbers)
+    {
+        while (true)
+        {
+            auto [token, tokenType] = Read();
+
+            switch (tokenType)
+            {
+            case TokenType::End:
+            case TokenType::Error:
+                goto End;
+
+            case TokenType::Number:
+                {
+                    //char const* endptr = token.end();
+                    uint32_t value = 0;
+                    std::from_chars(token.begin(), token.end(), /*out*/ value);
+                    numbers.push_back(value);
+                }
+                break;
+            }
+        }
+    End:;
+    }
+
+private:
+    span<const char> text_;
+};
+
+class PythonDictionaryWriter
+{
+public:
+    std::string_view GetText() const
+    {
+        return text_;
+    }
+
+    void Append(std::string_view text)
+    {
+        text_.append(text);
+    }
+
+    void WriteKeyValueUnquoted(std::string_view key, std::string_view value)
+    {
+        text_.append(key);
+        text_.append(":");
+        text_.append(value);
+        text_.append(", ");
+    }
+
+    void WriteKeyValue(std::string_view key, std::string_view value)
+    {
+        text_.push_back('\'');
+        text_.append(key);
+        text_.append("\':\'");
+        text_.append(value);
+        text_.append("\', ");
+    }
+
+    void WriteIntegers(span<const int32_t> numbers, std::string_view brackets)
+    {
+        if (!brackets.empty())
+        {
+            text_.push_back(brackets.front());
+        }
+        for (auto n : numbers)
+        {
+            char buffer[11];
+            auto result = std::to_chars(std::begin(buffer), std::end(buffer), n);
+            text_.append(std::begin(buffer), result.ptr);
+            text_.append(",");
+        }
+        if (!brackets.empty())
+        {
+            text_.push_back(brackets.back());
+        }
+    }
+
+private:
+    std::string text_;
+};
+
+struct NumPyArrayHeaderV1
+{
+    uint8_t signature[6]; // "\x0093NUMPY"
+    uint8_t majorVersion;
+    uint8_t minorVersion;
+    uint16_t dictionaryLength; // Confusingly instead labeled "HEADER_LEN" in the documentation.
+};
+
+struct NumPyArrayHeaderV2
+{
+    uint8_t signature[6]; // "\x0093NUMPY"
+    uint8_t majorVersion;
+    uint8_t minorVersion;
+    uint32_t dictionaryLength; // Confusingly instead labeled "HEADER_LEN" in the documentation.
+};
+
+void ReadNpy(
+    span<const char> fileData,
+    /*out*/onnx::TensorProto::DataType& dataType,
+    /*out*/std::vector<int32_t>& dimensions,
+    /*out*/std::vector<char>& arrayByteData
+    )
+{
+    dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
+    dimensions.clear();
+    arrayByteData.clear();
+
+    using namespace std::literals;
+
+    if (fileData.size_bytes() < sizeof(NumPyArrayHeaderV1))
+    {
+        throw std::ios::failure("NumPy array header signature is invalid.");
+    }
+
+    auto& headerV1 = read_as<NumPyArrayHeaderV1>(fileData);
+    auto& headerV2 = read_as<NumPyArrayHeaderV2>(fileData);
+    if (headerV1.majorVersion >= 3)
+    {
+        throw std::ios::failure("Versions > 4 unsupported.");
+    }
+
+    size_t dictionaryOffset = (headerV1.majorVersion >= 2) ? sizeof(NumPyArrayHeaderV2) : sizeof(NumPyArrayHeaderV1);
+    size_t dictionaryLength = (headerV1.majorVersion >= 2) ? headerV2.dictionaryLength : headerV1.dictionaryLength;
+    size_t dataByteOffset = dictionaryOffset + dictionaryLength;
+
+    PythonDictionaryLexer lexer(fileData.subrange(dictionaryOffset, fileData.size_bytes()));
+    std::map<std::string_view, std::string_view> dictionary = lexer.ReadDictionary();
+
+    bool isBackwardsEndian = false;
+    bool hasIncreasingStrides = false;
+
+    for (auto& i : dictionary)
+    {
+        if (i.first == "descr"sv)
+        {
+            MapNumPyArrayDataTypeToOnnx(i.second, /*out*/ dataType, /*out*/ isBackwardsEndian);
+        }
+        else if (i.first == "fortran_order"sv)
+        {
+            hasIncreasingStrides = (i.second == "True"sv);
+        }
+        else if (i.first == "shape"sv)
+        {
+            PythonDictionaryLexer shapeLexer(i.second);
+            shapeLexer.ParseIntegers(dimensions);
+        }
+    }
+
+    arrayByteData.assign(fileData.data() + dataByteOffset, fileData.end());
+    const uint32_t elementByteSize = GetByteSizeFromDataType(dataType);
+    const uint32_t totalElementCount = ComputeElementCount(dimensions);
+    const uint32_t totalByteSize = elementByteSize * totalElementCount;
+    if (arrayByteData.size() < totalByteSize)
+    {
+        arrayByteData.resize(totalByteSize);
+    }
+
+    // Assuming that we're running on a logical endian machine.
+    // If not, lots of other places would break too anyway.
+    if (isBackwardsEndian)
+    {
+        SwapBytes(/*inout*/ reinterpret_span<uint8_t>(arrayByteData), totalByteSize);
+    }
+    if (hasIncreasingStrides)
+    {
+        // TODO - augment RearrangeChannels to support reversing stride.
+        throw std::ios::failure("Fortran stride order unsupported.");
+    }
+}
+
+// Writes tensor data to in memory file data (not directly to file).
+void WriteNpy(
+    /*out*/span<char const> arrayByteData,
+    onnx::TensorProto::DataType dataType,
+    /*out*/span<int32_t> dimensions,
+    /*out*/std::string& fileData
+    )
+{
+    NumPyArrayHeaderV1 headerFixedPart = { {uint8_t('\x0093'),'N','U','M','P','Y'}, 1,0, 0 };
+
+    PythonDictionaryWriter dictionaryWriter;
+    PythonDictionaryWriter numberWriter;
+
+    // Format dictionary fields.
+    std::string numPyElementType;
+    MapOnnxDataTypeToNumPyArray(dataType, /*isBackwardsEndian*/ false, /*out*/ numPyElementType);
+    numberWriter.WriteIntegers(dimensions, "()");
+
+    dictionaryWriter.Append("{");
+    dictionaryWriter.WriteKeyValue("descr", numPyElementType);
+    dictionaryWriter.WriteKeyValueUnquoted("'fortran_order'", "False");
+    dictionaryWriter.WriteKeyValueUnquoted("'shape'", numberWriter.GetText());
+    dictionaryWriter.Append("}");
+
+    // Compute header length for alignment.
+    uint32_t headerLength = sizeof(headerFixedPart);
+    headerLength += static_cast<uint32_t>(dictionaryWriter.GetText().size());
+    headerLength++; // For new line.
+    headerLength = (headerLength + 63) & ~63; // For rounding up to multiple of 64 alignment.
+
+    // Write header, including fixed size part, dictionary, and alignment padding.
+    headerFixedPart.dictionaryLength = static_cast<uint16_t>(headerLength - sizeof(headerFixedPart));
+    fileData.append(reinterpret_cast<const char*>(&headerFixedPart), sizeof(headerFixedPart));
+    fileData.append(dictionaryWriter.GetText());
+    fileData.push_back('\x000A'); // Terminate with new line.
+    fileData.append(headerLength - fileData.size(), ' ');
+
+    fileData.append(arrayByteData.begin(), arrayByteData.end());
+}
+
+template<typename OutputElementType, typename Iterator, typename ContiguousByteOutputContainer>
+void CopyOnnxTensorDataToBuffer(
+    Iterator begin,
+    Iterator end,
+    size_t elementCount,
+    ContiguousByteOutputContainer& outputContainer
+    )
+{
+    static_assert(sizeof(*outputContainer.begin()) == 1);
+    constexpr size_t inputElementByteSize = sizeof(*begin);
+    constexpr size_t outputElementSize = sizeof(OutputElementType);
+    outputContainer.resize(elementCount * outputElementSize);
+
+    span<OutputElementType> outputValues = reinterpret_span<OutputElementType>(outputContainer);
+    size_t index = 0;
+    for (auto i = begin; i != end; ++i)
+    {
+        outputValues[index++] = static_cast<OutputElementType>(*i);
+    }
+}
+
+std::string GetOnnxTensorRawByteData(onnx::TensorProto tensor)
+{
+    std::string values;
+    if (tensor.has_raw_data())
+    {
+        values = tensor.raw_data();
+    }
+    else
+    {
+        switch (tensor.data_type())
+        {
+        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       CopyOnnxTensorDataToBuffer<bool>    (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      CopyOnnxTensorDataToBuffer<uint8_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       CopyOnnxTensorDataToBuffer<int8_t>  (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      CopyOnnxTensorDataToBuffer<int16_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     CopyOnnxTensorDataToBuffer<uint32_t>(tensor.uint64_data().begin(), tensor.uint64_data().end(), tensor.uint64_data_size(), values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      CopyOnnxTensorDataToBuffer<int32_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     CopyOnnxTensorDataToBuffer<uint64_t>(tensor.uint64_data().begin(), tensor.uint64_data().end(), tensor.uint64_data_size(), values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      CopyOnnxTensorDataToBuffer<int64_t> (tensor.int64_data().begin(),  tensor.int64_data().end(),  tensor.int64_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  values); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), values); break;
+        default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
+        }
+    }
+
+    return values;
+}
+
+void ConvertModel(
+    _In_z_ wchar_t const* inputFilename,
+    _In_z_ wchar_t const* outputFilename
+    )
+{
+    FileExtensionType inputFileExtensionType  = GetFileExtensionType(std::wstring_view(inputFilename));
+    FileExtensionType outputFileExtensionType = GetFileExtensionType(std::wstring_view(outputFilename));
+
+    onnx::ModelProto model;
+
+    bool succeeded = false;
+    if (inputFileExtensionType == FileExtensionType::Text)
+    {
+        std::string modelString = ReadTextFile(inputFilename);
+
+        // Essentially "google::protobuf::TextFormat::ParseFromString(modelString, &model)"
+        // except that we need to pass the flag to allow field numbers.
+
+        google::protobuf::TextFormat::Parser parser;
+        parser.AllowFieldNumber(true);
+        succeeded = parser.ParseFromString(modelString, &model);
+    }
+    else if (inputFileExtensionType == FileExtensionType::OnnxModel
+          || inputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    {
+        std::ifstream ifs(inputFilename, std::ios::binary);
+        succeeded = model.ParseFromIstream(&ifs);
+    }
+    else
+    {
+        throw std::invalid_argument("Unknown input graph file extension.");
+    }
+
+    if (!succeeded)
+    {
+        throw std::ios::failure("Could not parse input graph file.");
+    }
+
+    if (outputFileExtensionType == FileExtensionType::Text)
+    {
+        // Write the whole model to a text file.
+        // Use the stream instead of google::protobuf::TextFormat::PrintToString,
+        // which can fail for models that are >= 200MBs by running out of memory.
+        std::ofstream outputFile(outputFilename, std::ios::out);
+        std::unique_ptr<google::protobuf::io::ZeroCopyOutputStream> output(new google::protobuf::io::OstreamOutputStream(&outputFile));
+        succeeded = google::protobuf::TextFormat::Print(model, output.get());
+    }
+    else if (outputFileExtensionType == FileExtensionType::OnnxModel
+          || outputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    {
+        std::ofstream os(outputFilename, std::ios::binary);
+        succeeded = model.SerializeToOstream(&os);
+    }
+    else
+    {
+        throw std::invalid_argument("Unknown output graph file extension.");
+    }
+
+    if (!succeeded)
+    {
+        throw std::ios::failure("Could not serialize output graph file.");
+    }
+}
+
 struct PixelFormatAttributes
 {
     std::string_view pixelFormatString;
@@ -1004,10 +1624,11 @@ bool ResolvePixelFormat(
     return false;
 }
 
+// Downcasts a given element type to uint8 (e.g. for pixel imagery).
 template <typename T, size_t sourceElementByteStride = sizeof(T)>
 void ConvertElementTypeToUInt8(
     _In_reads_bytes_(elementCount * sourceElementByteStride) uint8_t const* source,
-    _In_reads_(elementCount) uint8_t* destination,
+    _Out_writes_(elementCount) uint8_t* destination,
     size_t elementCount
     )
 {
@@ -1260,59 +1881,6 @@ void MakeTensor(
     onnxTensor.set_raw_data(byteData.data(), byteData.size());
 }
 
-template<typename OutputElementType, typename Iterator, typename ContiguousByteOutputContainer>
-void CopyOnnxTensorDataToBuffer(
-    Iterator begin,
-    Iterator end,
-    size_t elementCount,
-    ContiguousByteOutputContainer& outputContainer
-    )
-{
-    static_assert(sizeof(*outputContainer.begin()) == 1);
-    constexpr size_t inputElementByteSize = sizeof(*begin);
-    constexpr size_t outputElementSize = sizeof(OutputElementType);
-    outputContainer.resize(elementCount * outputElementSize);
-
-    span<OutputElementType> outputValues = reinterpret_span<OutputElementType>(outputContainer);
-    size_t index = 0;
-    for (auto i = begin; i != end; ++i)
-    {
-        outputValues[index++] = static_cast<OutputElementType>(*i);
-    }
-}
-
-std::string GetOnnxTensorRawByteData(onnx::TensorProto tensor)
-{
-    std::string values;
-    if (tensor.has_raw_data())
-    {
-        values = tensor.raw_data();
-    }
-    else
-    {
-        switch (tensor.data_type())
-        {
-        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       CopyOnnxTensorDataToBuffer<bool>    (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      CopyOnnxTensorDataToBuffer<uint8_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       CopyOnnxTensorDataToBuffer<int8_t>  (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      CopyOnnxTensorDataToBuffer<int16_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     CopyOnnxTensorDataToBuffer<uint32_t>(tensor.uint64_data().begin(), tensor.uint64_data().end(), tensor.uint64_data_size(), values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      CopyOnnxTensorDataToBuffer<int32_t> (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     CopyOnnxTensorDataToBuffer<uint64_t>(tensor.uint64_data().begin(), tensor.uint64_data().end(), tensor.uint64_data_size(), values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      CopyOnnxTensorDataToBuffer<int64_t> (tensor.int64_data().begin(),  tensor.int64_data().end(),  tensor.int64_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  values); break;
-        case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), values); break;
-        default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
-        }
-    }
-
-    return values;
-}
-
 void ConvertTensor(
     _In_z_ wchar_t const* inputFilename,
     span<int32_t const> dimensions,
@@ -1502,13 +2070,16 @@ void ConvertTensor(
 
 void PrintUsage()
 {
-    std::cout << "ConvertOnnxModel 2018-07-19..2019-08-01 FDR\r\n"
+    // Credits, examples, and option help.
+    std::cout << "ConvertOnnxModel 2018-07-19..2020-07-10 FDR\r\n"
                  "Example usage:\r\n"
-                 "    ConvertOnnxModel.exe Foo.onnx Foo.txt\r\n"
-                 "    ConvertOnnxModel.exe Foo.txt Foo.onnx\r\n"
+                 "    ConvertOnnxModel.exe input.onnx output.txt\r\n"
+                 "    ConvertOnnxModel.exe input.txt output.onnx\r\n"
                  "    ConvertOnnxModel.exe -tensor Foo.pb Foo.csv\r\n"
                  "    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat\r\n"
                  "    ConvertOnnxModel.exe -tensor Foo.pb Foo.png\r\n"
+                 "    ConvertOnnxModel.exe Input.npy Output.onnxtensor\r\n"
+                 "    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy\r\n"
                  "\r\n"
                  "Parameters:\r\n"
                  "     input file: graph (onnx/pb/text) or tensor (pb/text/csv/dat)\r\n"
