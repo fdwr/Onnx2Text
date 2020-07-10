@@ -1512,6 +1512,73 @@ void ConvertModel(
         std::ofstream os(outputFilename, std::ios::binary);
         succeeded = model.SerializeToOstream(&os);
     }
+    else if (outputFileExtensionType == FileExtensionType::NumPyArray
+          || outputFileExtensionType == FileExtensionType::OnnxTensor
+          || outputFileExtensionType == FileExtensionType::RawData)
+    {
+        // enumerate all the tensor initializers, and dump their contents.
+
+        std::wstring initialFileName(outputFilename);
+        std::wstring currentFileName(outputFilename);
+        size_t substitutionOffset = initialFileName.find('*', 0);
+        if (substitutionOffset != std::string::npos)
+        {
+            initialFileName.erase(substitutionOffset, 1);
+        }
+        else
+        {
+            substitutionOffset = GetFileExtensionOffset(initialFileName);
+            if (substitutionOffset > 0 && initialFileName[substitutionOffset - 1] == '.')
+            {
+                --substitutionOffset;
+            }
+        }
+
+        onnx::GraphProto const& graphProto = model.graph();
+        for (const onnx::TensorProto& onnxTensor : graphProto.initializer())
+        {
+            // Read data type, dimensions, and name.
+            onnx::TensorProto::DataType dataType = onnxTensor.data_type();
+
+            std::vector<int32_t> dimensions;
+            for (auto v : onnxTensor.dims())
+            {
+                dimensions.push_back(static_cast<int32_t>(v));
+            }
+
+            std::wstring name = g_converterToUtf8.from_bytes(onnxTensor.name());
+            currentFileName.assign(initialFileName);
+            currentFileName.insert(substitutionOffset, name);
+
+            printf("Exporting tensor \"%S\"\n", currentFileName.c_str());
+
+            switch (outputFileExtensionType)
+            {
+            case FileExtensionType::OnnxTensor:
+                {
+                    std::ofstream os(currentFileName, std::ios::binary);
+                    succeeded = onnxTensor.SerializeToOstream(&os);
+                }
+                break;
+
+            case FileExtensionType::RawData:
+                {
+                    std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+                    WriteBinaryFile(currentFileName.c_str(), arrayByteData);
+                }
+                break;
+
+            case FileExtensionType::NumPyArray:
+                {
+                    std::string fileData;
+                    std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+                    WriteNpy(arrayByteData, onnxTensor.data_type(), dimensions, /*out*/ fileData);
+                    WriteBinaryFile(currentFileName.c_str(), fileData);
+                }
+                break;
+            }
+        }
+    }
     else
     {
         throw std::invalid_argument("Unknown output graph file extension.");
