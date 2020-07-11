@@ -11,6 +11,7 @@
 #include <numeric>
 #include <codecvt>
 #include <charconv>
+#include <random>
 
 #pragma warning(push)
 #pragma warning(disable: 4146)
@@ -109,6 +110,8 @@ public:
     T consume_back()  noexcept { return *--end_; }
     void pop_front() noexcept { ++begin_; }
     void pop_back()  noexcept { --end_; }
+    void pop_front(size_t n) noexcept { begin_ += n; }
+    void pop_back(size_t n)  noexcept { end_ -= n; }
 
 protected:
     T* begin_ = nullptr;
@@ -210,6 +213,44 @@ bool equals(ContainerType1&& c1, ContainerType2&& c2)
     return std::equal(c1.begin(), c1.end(), c2.begin(), c2.end());
 }
 
+// e.g. starts_with(some_string_view, "prefix");
+template <typename ContainerType1, typename ContainerType2>
+bool starts_with(ContainerType1&& fullSequence, ContainerType2&& prefix)
+{
+    return fullSequence.size() >= prefix.size()
+        && std::equal(fullSequence.begin(), fullSequence.begin() + prefix.size(), prefix.begin(), prefix.end());
+}
+
+template <typename ContainerType>
+auto find(ContainerType&& container, decltype(*container.data())&& value) -> decltype(container.begin())
+{
+    return std::find(container.begin(), container.end(), value);
+}
+
+template <typename ContainerType>
+auto tokenize(
+    ContainerType&& container,
+    std::remove_reference_t<decltype(*container.data())> divider
+    ) -> std::vector<span< std::remove_reference_t<decltype(*container.data())> >>
+{
+    using ElementType = std::remove_reference_t<decltype(*container.data())>;
+
+    std::vector<span<ElementType>> v;
+
+    for (auto i = container.begin(), end = container.end(); i != end; )
+    {
+        auto next = std::find(i, container.end(), divider);
+        v.push_back(span<ElementType>(&*i, &*next));
+        if (next != end)
+        {
+            ++next;
+        }
+        i = next;
+    }
+
+    return v;
+}
+
 std::string ReadTextFile(wchar_t const* inputFilename)
 {
     std::string fileData;
@@ -255,7 +296,7 @@ void WriteBinaryFile(wchar_t const* outputFilename, span<const char> fileData)
     file.write(fileData.data(), fileData.size());
 }
 
-enum class FileExtensionType
+enum class FileType
 {
     Unknown,             // .onnx
     OnnxModel,           // .onnx
@@ -266,6 +307,7 @@ enum class FileExtensionType
     RawData,             // .dat / .bin - raw binary, dump of tensor values as-is
     NumPyArray,          // .npy (not .npz zip files with multiple arrays in them)
     OnnxTensor,          // .onnxtensor
+    TensorGenerator,     // generator:
 };
 
 size_t GetFileExtensionOffset(std::wstring_view filename)
@@ -275,22 +317,23 @@ size_t GetFileExtensionOffset(std::wstring_view filename)
     return extensionOffset;
 }
 
-FileExtensionType GetFileExtensionType(std::wstring_view filename)
+FileType GetFileType(std::wstring_view filename)
 {
     size_t extensionOffset = GetFileExtensionOffset(filename);
     std::wstring_view filenameExtension = filename.substr(extensionOffset);
-    if (filenameExtension == L"pb"  ) return FileExtensionType::GoogleProtobuf;
-    if (filenameExtension == L"onnx") return FileExtensionType::OnnxModel;
-    if (filenameExtension == L"txt" ) return FileExtensionType::Text;
-    if (filenameExtension == L"csv" ) return FileExtensionType::CommaSeparatedValue;
-    if (filenameExtension == L"dat" ) return FileExtensionType::RawData;
-    if (filenameExtension == L"bin" ) return FileExtensionType::RawData;
-    if (filenameExtension == L"png" ) return FileExtensionType::Image;
-    if (filenameExtension == L"jpg" ) return FileExtensionType::Image;
-    if (filenameExtension == L"jpeg") return FileExtensionType::Image;
-    if (filenameExtension == L"npy")  return FileExtensionType::NumPyArray;
-    if (filenameExtension == L"onnxtensor") return FileExtensionType::OnnxTensor;
-    return FileExtensionType::Unknown;
+    if (starts_with(filename, std::wstring_view(L"generate:"))) return FileType::TensorGenerator;
+    if (filenameExtension == L"pb"  ) return FileType::GoogleProtobuf;
+    if (filenameExtension == L"onnx") return FileType::OnnxModel;
+    if (filenameExtension == L"txt" ) return FileType::Text;
+    if (filenameExtension == L"csv" ) return FileType::CommaSeparatedValue;
+    if (filenameExtension == L"dat" ) return FileType::RawData;
+    if (filenameExtension == L"bin" ) return FileType::RawData;
+    if (filenameExtension == L"png" ) return FileType::Image;
+    if (filenameExtension == L"jpg" ) return FileType::Image;
+    if (filenameExtension == L"jpeg") return FileType::Image;
+    if (filenameExtension == L"npy")  return FileType::NumPyArray;
+    if (filenameExtension == L"onnxtensor") return FileType::OnnxTensor;
+    return FileType::Unknown;
 }
 
 size_t GetDataTypeElementByteSize(onnx::TensorProto::DataType dataType)
@@ -315,7 +358,7 @@ size_t GetDataTypeElementByteSize(onnx::TensorProto::DataType dataType)
     }
 }
 
-union CsvValueUnion
+union ScalarValueUnion
 {
     double floatValue;
     int64_t intValue;
@@ -330,7 +373,6 @@ enum class CsvValueNumberClass
     Hex,
 };
 
-//    ValueNumberClass valueNumberClass = ValueNumberClass::Uint;
 CsvValueNumberClass GetCsvValueNumberClass(
     onnx::TensorProto::DataType dataType,
     bool shouldPrintRawBytes
@@ -363,6 +405,71 @@ CsvValueNumberClass GetCsvValueNumberClass(
     }
 
     return valueNumberClass;
+}
+
+void WriteTensorValue(
+    void* data, // Must point to memory that has at least the number of bytes specified by the dataType.
+    onnx::TensorProto::DataType dataType,
+    ScalarValueUnion value
+    )
+{
+    switch (dataType)
+    {
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       *reinterpret_cast<bool*>    (data) = static_cast<bool>    (value.uintValue ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      *reinterpret_cast<uint8_t*> (data) = static_cast<uint8_t> (value.uintValue ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value.uintValue ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     *reinterpret_cast<uint32_t*>(data) = static_cast<uint32_t>(value.uintValue ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     *reinterpret_cast<uint64_t*>(data) = static_cast<uint64_t>(value.uintValue ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       *reinterpret_cast<int8_t*>  (data) = static_cast<int8_t>  (value.intValue  ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      *reinterpret_cast<int16_t*> (data) = static_cast<int16_t> (value.intValue  ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      *reinterpret_cast<int32_t*> (data) = static_cast<int32_t> (value.intValue  ); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      *reinterpret_cast<int64_t*> (data) = static_cast<int64_t> (value.intValue  ); break;
+    default: throw std::ios::failure("Unsupported data type for tensor.");
+    }
+}
+
+void WriteTensorValues(
+    /*out*/ span<uint8_t> arrayByteData,
+    onnx::TensorProto::DataType dataType,
+    ScalarValueUnion value
+    )
+{
+    const size_t elementByteSize = GetDataTypeElementByteSize(dataType);
+    if (elementByteSize == 0)
+    {
+        return;
+    }
+
+    size_t alignedByteCount = arrayByteData.size_bytes() / elementByteSize * elementByteSize;
+    for (size_t i = 0; i < alignedByteCount; i += elementByteSize)
+    {
+        WriteTensorValue(/*out*/ &arrayByteData[i], dataType, value);
+    }
+}
+
+void WriteTensorValues(
+    /*out*/ span<uint8_t> arrayByteData,
+    onnx::TensorProto::DataType dataType,
+    std::function<ScalarValueUnion()> valueGetter
+    )
+{
+    const size_t elementByteSize = GetDataTypeElementByteSize(dataType);
+    if (elementByteSize == 0)
+    {
+        return;
+    }
+
+    size_t alignedByteCount = arrayByteData.size_bytes() / elementByteSize * elementByteSize;
+    for (size_t i = 0; i < alignedByteCount; i += elementByteSize)
+    {
+        ScalarValueUnion value = valueGetter();
+        WriteTensorValue(/*out*/ &arrayByteData[i], dataType, value);
+    }
 }
 
 void ReadCsv(
@@ -425,24 +532,23 @@ void ReadCsv(
         // Write the value to the byte buffer.
         if (rowRange.Contains(row) && columnRange.Contains(column))
         {
-            CsvValueUnion value = {};
+            ScalarValueUnion value = {};
 
             // Read the numeric value.
             bool shouldReadRawBytes = false;
-            char* numberEnd;
             if (numberStart[0] == '0' && numberStart[1] == 'x')
             {
                 shouldReadRawBytes = true;
-                value.uintValue = strtoull(numberStart, &numberEnd, 16);
+                std::from_chars(numberStart + 2, end, /*out*/ value.uintValue);
             }
             else
             {
                 switch (valueNumberClass)
                 {
-                case CsvValueNumberClass::Int:   value.uintValue  = strtoll(numberStart, &numberEnd, 10);  break;
-                case CsvValueNumberClass::Uint:  value.uintValue  = strtoull(numberStart, &numberEnd, 10); break;
-                case CsvValueNumberClass::Float: value.floatValue = strtod(numberStart, &numberEnd);       break;
-                case CsvValueNumberClass::Hex:   value.uintValue  = strtoull(numberStart, &numberEnd, 16); break;
+                case CsvValueNumberClass::Int:   std::from_chars(numberStart, end, /*out*/ value.intValue);      break;
+                case CsvValueNumberClass::Uint:  std::from_chars(numberStart, end, /*out*/ value.uintValue);     break;
+                case CsvValueNumberClass::Float: std::from_chars(numberStart, end, /*out*/ value.floatValue);    break;
+                case CsvValueNumberClass::Hex:   std::from_chars(numberStart, end, /*out*/ value.uintValue, 16); break;
                 }
             }
 
@@ -477,24 +583,7 @@ void ReadCsv(
             }
             else
             {
-                switch (dataType)
-                {
-                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value.floatValue); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       *reinterpret_cast<bool*>    (data) = static_cast<bool>    (value.uintValue ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      *reinterpret_cast<uint8_t*> (data) = static_cast<uint8_t> (value.uintValue ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value.uintValue ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     *reinterpret_cast<uint32_t*>(data) = static_cast<uint32_t>(value.uintValue ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     *reinterpret_cast<uint64_t*>(data) = static_cast<uint64_t>(value.uintValue ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       *reinterpret_cast<int8_t*>  (data) = static_cast<int8_t>  (value.intValue  ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      *reinterpret_cast<int16_t*> (data) = static_cast<int16_t> (value.intValue  ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      *reinterpret_cast<int32_t*> (data) = static_cast<int32_t> (value.intValue  ); break;
-                case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      *reinterpret_cast<int64_t*> (data) = static_cast<int64_t> (value.intValue  ); break;
-                default: throw std::ios::failure("Unsupported data type in tensor for CSV input.");
-                }
+                WriteTensorValue(/*out*/ data, dataType, value);
             }
         }
 
@@ -554,7 +643,6 @@ void WriteCsv(
     text.clear();
 
     size_t elementByteSize = GetDataTypeElementByteSize(dataType);
-    size_t byteDataSize = 0;
 
     char buffer[40];
 
@@ -566,7 +654,7 @@ void WriteCsv(
     char const* begin = byteData.data();
     char const* end = byteData.data() + byteData.size();
 
-    CsvValueUnion value;
+    ScalarValueUnion value;
 
     while (begin != end)
     {
@@ -703,6 +791,26 @@ constexpr uint32_t g_elementDataTypeByteSizes[] =
     16,// Complex128 = 15,
 };
 
+constexpr bool g_isFloatingPointElementDataType[] =
+{
+    false, // Undefined = 0,
+    true , // Float32 = 1,
+    false, // Uint8 = 2,
+    false, // Int8 = 3,
+    false, // Uint16 = 4,
+    false, // Int16 = 5,
+    false, // Int32 = 6,
+    false, // Int64 = 7,
+    false, // StringChar8 = 8,
+    false, // Bool = 9,
+    true , // Float16 = 10,
+    true , // Float64 = 11,
+    false, // Uint32 = 12,
+    false, // Uint64 = 13,
+    true , // Complex64 = 14,
+    true , // Complex128 = 15,
+};
+
 std::string_view GetStringNameFromDataType(onnx::TensorProto::DataType dataType) noexcept
 {
     size_t index = static_cast<size_t>(dataType);
@@ -726,6 +834,12 @@ onnx::TensorProto::DataType GetDataTypeFromStringName(std::string_view name) noe
     return (i == std::end(g_elementDataTypeNames))
         ? onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED
         : onnx::TensorProto::DataType(i - std::begin(g_elementDataTypeNames));
+}
+
+bool IsFloatingPointDataType(onnx::TensorProto::DataType dataType) noexcept
+{
+    size_t index = static_cast<size_t>(dataType);
+    return g_isFloatingPointElementDataType[index < std::size(g_elementDataTypeNames) ? index : 0];
 }
 
 bool IsRecognizedChannelLayoutString(std::string_view channelLayoutString)
@@ -839,7 +953,7 @@ void RearrangeChannels(
     pixelBytes = std::move(destinationPixelBytes);
 }
 
-void SwapBytes(span<uint8_t> arrayByteData, uint32_t elementByteSize)
+void SwapBytes(/*inout*/ span<uint8_t> arrayByteData, uint32_t elementByteSize)
 {
     switch (elementByteSize)
     {
@@ -1459,18 +1573,58 @@ std::string GetOnnxTensorRawByteData(onnx::TensorProto tensor)
     return values;
 }
 
+void PrintTensorInfo(
+    std::string_view name,
+    std::wstring_view fileName,
+    span<const int32_t> dimensions,
+    onnx::TensorProto::DataType dataType
+    )
+{
+    std::string dimensionsText;
+    WriteCsv(
+        reinterpret_span<char const>(dimensions),
+        onnx::TensorProto::DataType::TensorProto_DataType_INT32,
+        /*shouldPrintRawBytes*/ false,
+        /*out*/ dimensionsText
+    );
+
+    const uint32_t byteSize = GetByteSizeFromDimensions(dimensions, dataType);
+    if (!fileName.empty())
+    {
+        printf(
+            "Tensor \"%.*S\", datatype: %s, dimensions: %s (%d bytes)\n",
+            uint32_t(fileName.size()),
+            fileName.data(),
+            GetStringNameFromDataType(dataType).data(),
+            dimensionsText.c_str(),
+            byteSize
+        );
+    }
+    else
+    {
+        printf(
+            "Tensor \"%.*s\", datatype: %s, dimensions: %s, (%d bytes)\n",
+            uint32_t(name.size()),
+            name.data(),
+            GetStringNameFromDataType(dataType).data(),
+            dimensionsText.c_str(),
+            byteSize
+        );
+    }
+}
+
 void ConvertModel(
     _In_z_ wchar_t const* inputFilename,
     _In_z_ wchar_t const* outputFilename
     )
 {
-    FileExtensionType inputFileExtensionType  = GetFileExtensionType(std::wstring_view(inputFilename));
-    FileExtensionType outputFileExtensionType = GetFileExtensionType(std::wstring_view(outputFilename));
+    FileType inputFileType  = GetFileType(std::wstring_view(inputFilename));
+    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
 
     onnx::ModelProto model;
 
     bool succeeded = false;
-    if (inputFileExtensionType == FileExtensionType::Text)
+    if (inputFileType == FileType::Text)
     {
         std::string modelString = ReadTextFile(inputFilename);
 
@@ -1481,8 +1635,8 @@ void ConvertModel(
         parser.AllowFieldNumber(true);
         succeeded = parser.ParseFromString(modelString, &model);
     }
-    else if (inputFileExtensionType == FileExtensionType::OnnxModel
-          || inputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    else if (inputFileType == FileType::OnnxModel
+          || inputFileType == FileType::GoogleProtobuf)
     {
         std::ifstream ifs(inputFilename, std::ios::binary);
         succeeded = model.ParseFromIstream(&ifs);
@@ -1497,7 +1651,7 @@ void ConvertModel(
         throw std::ios::failure("Could not parse input graph file.");
     }
 
-    if (outputFileExtensionType == FileExtensionType::Text)
+    if (outputFileType == FileType::Text)
     {
         // Write the whole model to a text file.
         // Use the stream instead of google::protobuf::TextFormat::PrintToString,
@@ -1506,15 +1660,15 @@ void ConvertModel(
         std::unique_ptr<google::protobuf::io::ZeroCopyOutputStream> output(new google::protobuf::io::OstreamOutputStream(&outputFile));
         succeeded = google::protobuf::TextFormat::Print(model, output.get());
     }
-    else if (outputFileExtensionType == FileExtensionType::OnnxModel
-          || outputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    else if (outputFileType == FileType::OnnxModel
+          || outputFileType == FileType::GoogleProtobuf)
     {
         std::ofstream os(outputFilename, std::ios::binary);
         succeeded = model.SerializeToOstream(&os);
     }
-    else if (outputFileExtensionType == FileExtensionType::NumPyArray
-          || outputFileExtensionType == FileExtensionType::OnnxTensor
-          || outputFileExtensionType == FileExtensionType::RawData)
+    else if (outputFileType == FileType::NumPyArray
+          || outputFileType == FileType::OnnxTensor
+          || outputFileType == FileType::RawData)
     {
         // enumerate all the tensor initializers, and dump their contents.
 
@@ -1545,30 +1699,31 @@ void ConvertModel(
             {
                 dimensions.push_back(static_cast<int32_t>(v));
             }
+            const uint32_t elementCount = ComputeElementCount(dimensions);
 
             std::wstring name = g_converterToUtf8.from_bytes(onnxTensor.name());
             currentFileName.assign(initialFileName);
             currentFileName.insert(substitutionOffset, name);
 
-            printf("Exporting tensor \"%S\"\n", currentFileName.c_str());
+            PrintTensorInfo(onnxTensor.name(), currentFileName, dimensions, dataType);
 
-            switch (outputFileExtensionType)
+            switch (outputFileType)
             {
-            case FileExtensionType::OnnxTensor:
+            case FileType::OnnxTensor:
                 {
                     std::ofstream os(currentFileName, std::ios::binary);
                     succeeded = onnxTensor.SerializeToOstream(&os);
                 }
                 break;
 
-            case FileExtensionType::RawData:
+            case FileType::RawData:
                 {
                     std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
                     WriteBinaryFile(currentFileName.c_str(), arrayByteData);
                 }
                 break;
 
-            case FileExtensionType::NumPyArray:
+            case FileType::NumPyArray:
                 {
                     std::string fileData;
                     std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
@@ -1799,7 +1954,7 @@ void LoadImageData(
             nullptr,
             0.f,
             WICBitmapPaletteTypeMedianCut
-            ));
+        ));
         pixelSource = converter.Get();
     }
     // Just use the type in the image, but verify that it's a type we actually recognize.
@@ -1928,6 +2083,132 @@ void StoreImageData(
     THROW_IF_FAILED(encoder->Commit());
 }
 
+void GenerateTensorSequence(
+    std::wstring_view fileName,
+    onnx::TensorProto::DataType dataType,
+    span<int32_t const> dimensions,
+    /*out*/ std::vector<char>& arrayByteData
+    )
+{
+    arrayByteData.clear();
+    arrayByteData.resize(GetByteSizeFromDimensions(dimensions, dataType));
+
+    // Strip off "generate:".
+    if (!starts_with(fileName, std::wstring_view(L"generate:")))
+    {
+        return;
+    }
+    span<const wchar_t> generatorType = fileName;
+    generatorType.pop_front(9);
+
+    // Tokenize using commas.
+    std::vector<span<const wchar_t>> tokens = tokenize(generatorType, L',');
+    if (tokens.empty())
+    {
+        throw std::invalid_argument("Expected a value generator after generate (e.g. ones, zeros, values, iota, random");
+    }
+
+    ScalarValueUnion valueUnion = {};
+    const bool isFloatingPointDataType = IsFloatingPointDataType(dataType);
+
+    auto GetFloatNumberFromToken = [](span<const wchar_t> token)
+    {
+        float value = 0;
+        std::string tokenU8 = g_converterToUtf8.to_bytes(token.begin(), token.end());
+        std::from_chars(tokenU8.data(), tokenU8.data() + tokenU8.size(), /*out*/ value);
+        return value;
+    };
+
+    if (equals(tokens.front(), std::wstring_view(L"zeros"))) // (not "zeroes" which is a verb)
+    {
+        // The default getter already returns zeros.
+        WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, valueUnion);
+    }
+    else if (equals(tokens.front(), std::wstring_view(L"ones")))
+    {
+        if (isFloatingPointDataType)
+        {
+            valueUnion.floatValue = 1.0;
+        }
+        else
+        {
+            valueUnion.uintValue = 1;
+        }
+        WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, valueUnion);
+    }
+    else if (equals(tokens.front(), std::wstring_view(L"values")))
+    {
+        float value = (tokens.size() > 1) ? GetFloatNumberFromToken(tokens[1]) : 1.0f;
+        if (isFloatingPointDataType)
+        {
+            valueUnion.floatValue = value;
+        }
+        else
+        {
+            valueUnion.intValue = static_cast<int64_t>(value);
+        }
+        WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, valueUnion);
+    }
+    else if (equals(tokens.front(), std::wstring_view(L"iota")))
+    {
+        float startingValue = (tokens.size() > 1) ? GetFloatNumberFromToken(tokens[1]) : 0.0f;
+
+        std::function<ScalarValueUnion()> getter;
+        if (isFloatingPointDataType)
+        {
+            valueUnion.floatValue = startingValue;
+            getter = [&]()->ScalarValueUnion
+            {
+                ScalarValueUnion newValueUnion = valueUnion;
+                ++valueUnion.floatValue;
+                return newValueUnion;
+            };
+        }
+        else // Integer
+        {
+            valueUnion.intValue = static_cast<int64_t>(startingValue);
+            getter = [&]()->ScalarValueUnion
+            {
+                ScalarValueUnion newValueUnion = valueUnion;
+                ++valueUnion.intValue;
+                return newValueUnion;
+            };
+        }
+        WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, getter);
+    }
+    else if (equals(tokens.front(), std::wstring_view(L"random")))
+    {
+        float min = (tokens.size() > 1) ? GetFloatNumberFromToken(tokens[1]) : 1.0f;
+        float max = (tokens.size() > 2) ? GetFloatNumberFromToken(tokens[2]) : 255.0f;
+
+        std::function<ScalarValueUnion()> getter;
+        std::default_random_engine generator;
+        std::uniform_int_distribution<int> intDistribution(static_cast<int>(min), static_cast<int>(max));
+        std::uniform_real_distribution<float> floatDistribution(min, max);
+
+        if (isFloatingPointDataType)
+        {
+            getter = [&]()->ScalarValueUnion
+            {
+                ScalarValueUnion value = {};
+                value.floatValue = floatDistribution(generator);
+                return value;
+            };
+        }
+        else // Integer
+        {
+            getter = [&]()->ScalarValueUnion
+            {
+                ScalarValueUnion value = {};
+                value.intValue = intDistribution(generator);
+                return value;
+            };
+        }
+
+        WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, getter);
+    }
+}
+
 void MakeTensor(
     span<char const> byteData,
     onnx::TensorProto::DataType dataType,
@@ -1960,8 +2241,8 @@ void ConvertTensor(
     _In_z_ wchar_t const* outputFilename
     )
 {
-    FileExtensionType inputFileExtensionType  = GetFileExtensionType(std::wstring_view(inputFilename));
-    FileExtensionType outputFileExtensionType = GetFileExtensionType(std::wstring_view(outputFilename));
+    FileType inputFileType  = GetFileType(std::wstring_view(inputFilename));
+    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
 
     // Set defaults.
     if (dataType == onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED)
@@ -1975,50 +2256,50 @@ void ConvertTensor(
     }
 
     onnx::TensorProto tensor;
-    std::vector<int32_t> resolvedDimensions;
+    std::vector<int32_t> resolvedDimensions(dimensions.begin(), dimensions.end());
 
     if (!dimensions.empty())
     {
-        if (inputFileExtensionType == FileExtensionType::Text
-        ||  inputFileExtensionType == FileExtensionType::OnnxModel
-        ||  inputFileExtensionType == FileExtensionType::GoogleProtobuf
-        ||  inputFileExtensionType == FileExtensionType::OnnxTensor
-        ||  inputFileExtensionType == FileExtensionType::NumPyArray
-        ||  inputFileExtensionType == FileExtensionType::Image)
+        if (inputFileType == FileType::Text
+        ||  inputFileType == FileType::OnnxModel
+        ||  inputFileType == FileType::GoogleProtobuf
+        ||  inputFileType == FileType::OnnxTensor
+        ||  inputFileType == FileType::NumPyArray
+        ||  inputFileType == FileType::Image)
         {
             throw std::invalid_argument("\"dimensions\" are invalid when reading from this file type.");
         }
     }
 
     bool succeeded = true;
-    if (inputFileExtensionType == FileExtensionType::Text)
+    if (inputFileType == FileType::Text)
     {
         std::string modelString = ReadTextFile(inputFilename);
         succeeded = google::protobuf::TextFormat::ParseFromString(modelString, &tensor);
     }
-    else if (inputFileExtensionType == FileExtensionType::OnnxTensor
-          || inputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    else if (inputFileType == FileType::OnnxTensor
+          || inputFileType == FileType::GoogleProtobuf)
     {
         std::ifstream ifs(inputFilename, std::ios::binary);
         succeeded = tensor.ParseFromIstream(&ifs);
     }
-    else if (inputFileExtensionType == FileExtensionType::RawData)
+    else if (inputFileType == FileType::RawData)
     {
         std::string arrayByteData = ReadTextFile(inputFilename);
         resolvedDimensions = ResolveEmptyDimensions(dimensions, arrayByteData, dataType);
 
         MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
-    else if (inputFileExtensionType == FileExtensionType::CommaSeparatedValue)
+    else if (inputFileType == FileType::CommaSeparatedValue)
     {
         std::string text = ReadTextFile(inputFilename);
         std::vector<char> arrayByteData;
-        resolvedDimensions = ResolveEmptyDimensions(dimensions, /*out*/ arrayByteData, dataType);
 
         ReadCsv(text, dataType, rowRange, columnRange, /*out*/ arrayByteData);
+        resolvedDimensions = ResolveEmptyDimensions(dimensions, arrayByteData, dataType);
         MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
-    else if (inputFileExtensionType == FileExtensionType::NumPyArray)
+    else if (inputFileType == FileType::NumPyArray)
     {
         std::string fileData = ReadTextFile(inputFilename);
         std::vector<char> arrayByteData;
@@ -2026,7 +2307,7 @@ void ConvertTensor(
         ReadNpy(fileData, /*out*/ dataType, /*out*/ resolvedDimensions, /*out*/ arrayByteData);
         MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
-    else if (inputFileExtensionType == FileExtensionType::Image)
+    else if (inputFileType == FileType::Image)
     {
         std::vector<uint8_t> pixelBytes;
         LoadImageData(
@@ -2035,10 +2316,16 @@ void ConvertTensor(
             /*out*/ dataType, // Ignore the passed data type, using the image's data type instead.
             /*out*/ resolvedDimensions,
             /*out*/ pixelBytes
-            );
+        );
 
         RearrangeChannels(dataType, resolvedDimensions, "nhwc", channelLayoutString, /*inout*/ pixelBytes);
         MakeTensor(reinterpret_span<const char>(pixelBytes), dataType, resolvedDimensions, "", /*out*/ tensor);
+    }
+    else if (inputFileType == FileType::TensorGenerator)
+    {
+        std::vector<char> arrayByteData;
+        GenerateTensorSequence(inputFilename, dataType, dimensions, /*out*/ arrayByteData);
+        MakeTensor(arrayByteData, dataType, resolvedDimensions, "", /*out*/ tensor);
     }
     else
     {
@@ -2061,18 +2348,9 @@ void ConvertTensor(
     }
 
     // Print details.
-    {
-        std::string dimensionsText;
-        WriteCsv(
-            reinterpret_span<char const>(resolvedDimensions),
-            onnx::TensorProto::DataType::TensorProto_DataType_INT32,
-            /*shouldPrintRawBytes*/ false,
-            /*out*/ dimensionsText
-        );
-        printf("Tensor data type: %s, Dimensions: %s\r\n", GetStringNameFromDataType(dataType).data(), dimensionsText.c_str());
-    }
+    PrintTensorInfo(tensor.name(), L"", resolvedDimensions, dataType);
 
-    if (outputFileExtensionType == FileExtensionType::Text)
+    if (outputFileType == FileType::Text)
     {
         std::string modelString;
         if (succeeded = google::protobuf::TextFormat::PrintToString(tensor, &modelString))
@@ -2080,32 +2358,32 @@ void ConvertTensor(
             WriteBinaryFile(outputFilename, modelString);
         }
     }
-    else if (outputFileExtensionType == FileExtensionType::OnnxTensor
-          || outputFileExtensionType == FileExtensionType::GoogleProtobuf)
+    else if (outputFileType == FileType::OnnxTensor
+          || outputFileType == FileType::GoogleProtobuf)
     {
         std::ofstream os(outputFilename, std::ios::binary);
         succeeded = tensor.SerializeToOstream(&os);
     }
-    else if (outputFileExtensionType == FileExtensionType::RawData)
+    else if (outputFileType == FileType::RawData)
     {
         std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
         WriteBinaryFile(outputFilename, arrayByteData);
     }
-    else if (outputFileExtensionType == FileExtensionType::CommaSeparatedValue)
+    else if (outputFileType == FileType::CommaSeparatedValue)
     {
         std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
         std::string text;
         WriteCsv(arrayByteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
         WriteBinaryFile(outputFilename, text);
     }
-    else if (outputFileExtensionType == FileExtensionType::NumPyArray)
+    else if (outputFileType == FileType::NumPyArray)
     {
         std::string fileData;
         std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
         WriteNpy(arrayByteData, tensor.data_type(), resolvedDimensions, /*out*/ fileData);
         WriteBinaryFile(outputFilename, fileData);
     }
-    else if (outputFileExtensionType == FileExtensionType::Image)
+    else if (outputFileType == FileType::Image)
     {
         std::string arrayByteData = GetOnnxTensorRawByteData(tensor);
         std::vector<uint8_t> pixelBytes(arrayByteData.data(), arrayByteData.data() + arrayByteData.size());
@@ -2138,28 +2416,46 @@ void ConvertTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "ConvertOnnxModel 2018-07-19..2020-07-10 FDR\r\n"
+    std::cout << "ConvertOnnxModel 2018-07-19..2020-07-11 FDR\r\n"
                  "Example usage:\r\n"
                  "    ConvertOnnxModel.exe input.onnx output.txt\r\n"
                  "    ConvertOnnxModel.exe input.txt output.onnx\r\n"
-                 "    ConvertOnnxModel.exe -tensor Foo.pb Foo.csv\r\n"
+                 "    ConvertOnnxModel.exe input.onnxtensor output.csv\r\n"
+                 "    ConvertOnnxModel.exe -tensor input.pb output.png\r\n"
                  "    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat\r\n"
-                 "    ConvertOnnxModel.exe -tensor Foo.pb Foo.png\r\n"
-                 "    ConvertOnnxModel.exe Input.npy Output.onnxtensor\r\n"
+                 "    ConvertOnnxModel.exe input.npy output.onnxtensor\r\n"
                  "    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy\r\n"
+                 "    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate:random,1,24 output.onnxtensor\r\n"
                  "\r\n"
                  "Parameters:\r\n"
-                 "     input file: graph (onnx/pb/text) or tensor (pb/text/csv/dat)\r\n"
-                 "    output file: graph (onnx/pb/text) or tensor (pb/text/csv/dat)\r\n"
-                 "        -tensor: convert tensor instead of graph.\r\n"
-                 "         -graph: convert graph (default).\r\n"
-                 "    -dimensions: explicit tensor dimensions for .csv or .dat file. Defaults to\r\n"
-                 "                 1D element count from source data.\r\n"
-                 "      -datatype: tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
-                 "                 uint16,int32,uint32,int64,uint64,bool8,complex64,complex128).\r\n"
-                 "        -rawhex: display as raw hexadecimal when writing .csv\r\n"
-                 "           -row: single row or range for .csv.\r\n"
-                 "        -column: single column or range for .csv.\r\n"
+                 "     input file - graph (onnx/pb/text) or tensor (onnxtensor/pb/npy/text/csv/dat/generate)\r\n"
+                 "    output file - graph (onnx/pb/text) or tensor (onnxtensor/pb/npy/text/csv/dat)\r\n"
+                 "        -tensor - convert tensor instead of graph (if can't tell from file extension).\r\n"
+                 "         -graph - convert graph (default).\r\n"
+                 "    -dimensions - explicit tensor dimensions for .csv or .dat file. Defaults to\r\n"
+                 "                  1D element count from source data.\r\n"
+                 "      -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
+                 "                  uint16,int32,uint32,int64,uint64,bool8,complex64,complex128).\r\n"
+                 "        -rawhex - display as raw hexadecimal when writing .csv\r\n"
+                 "           -row - single row or range for .csv.\r\n"
+                 "        -column - single column or range for .csv.\r\n"
+                 "\r\n"
+                 "File types:\r\n"
+                 "    .onnx - ONNX model protobuf\r\n"
+                 "    .onnxtensor - ONNX tensor\r\n"
+                 "    .pb  - Google Protobuf (unstated type, might be tensor)\r\n"
+                 "    .txt - Text\r\n"
+                 "    .csv - Comma Separate Value\r\n"
+                 "    .png - Image (Portable Network Graphics)\r\n"
+                 "    .jpg - Image (Joint Photographic Experts Group)\r\n"
+                 "    .npy - NumPyArray single tensor\r\n"
+                 "    .dat/.bin - Raw binary array (no header)\r\n"
+                 "    generator: - Generator pseudo filename\r\n"
+                 "      generator:ones - all ones. [1,1,1,1...]\r\n"
+                 "      generator:zeros - all zeros [0,0,0,0...]\r\n"
+                 "      generator:values(,value) - specific value [3,3,3,3...]\r\n"
+                 "      generator:iota(,startingvalue) - increasing sequence [0,1,2,3...]\r\n"
+                 "      generator:random(,min(,max)) - random values between min/max [31,56,2,69...]\r\n"
                  ;
 }
 
@@ -2194,19 +2490,20 @@ const char* g_conversionModeNames[3] =
 };
 static_assert(std::extent<decltype(g_conversionModeNames)>::value == uint32_t(ConversionMode::Total));
 
-ConversionMode GetConversionModeFromFileExtensionType(FileExtensionType fileExtensionType)
+ConversionMode GetConversionModeFromFileType(FileType fileType)
 {
-    switch (fileExtensionType)
+    switch (fileType)
     {
-    case FileExtensionType::Unknown: return ConversionMode::Unknown;
-    case FileExtensionType::OnnxModel: return ConversionMode::Graph;
-    case FileExtensionType::GoogleProtobuf: return ConversionMode::Unknown;
-    case FileExtensionType::Text: return ConversionMode::Unknown;
-    case FileExtensionType::CommaSeparatedValue: return ConversionMode::Tensor;
-    case FileExtensionType::Image: return ConversionMode::Tensor;
-    case FileExtensionType::RawData: return ConversionMode::Unknown;
-    case FileExtensionType::OnnxTensor: return ConversionMode::Tensor;
-    case FileExtensionType::NumPyArray: return ConversionMode::Tensor;
+    case FileType::Unknown: return ConversionMode::Unknown;
+    case FileType::OnnxModel: return ConversionMode::Graph;
+    case FileType::GoogleProtobuf: return ConversionMode::Unknown;
+    case FileType::Text: return ConversionMode::Unknown;
+    case FileType::CommaSeparatedValue: return ConversionMode::Tensor;
+    case FileType::Image: return ConversionMode::Tensor;
+    case FileType::RawData: return ConversionMode::Unknown;
+    case FileType::OnnxTensor: return ConversionMode::Tensor;
+    case FileType::NumPyArray: return ConversionMode::Tensor;
+    case FileType::TensorGenerator: return ConversionMode::Tensor;
     }
     return ConversionMode::Unknown;
 }
@@ -2238,7 +2535,7 @@ int Main(int argc, wchar_t** argv)
             {
                 if (++i >= argc)
                 {
-                    throw std::invalid_argument("Dimensions expected: -dimensions 224,224");
+                    throw std::invalid_argument("Dimensions expected. e.g. -dimensions 3,224,224");
                 }
 
                 std::string s = g_converterToUtf8.to_bytes(argv[i]);
@@ -2248,11 +2545,15 @@ int Main(int argc, wchar_t** argv)
             {
                 if (++i >= argc)
                 {
-                    throw std::invalid_argument("Data type expected: -datatype float32 (uint8, int32, int16, bool8, float64...)");
+                    throw std::invalid_argument("Valid data type expected: -datatype float32 (uint8, int32, int16, bool8, float64...)");
                 }
 
                 std::string s = g_converterToUtf8.to_bytes(argv[i]);
                 dataType = GetDataTypeFromStringName(s);
+                if (dataType == onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED)
+                {
+                    throw std::invalid_argument("Valid data type expected: -datatype float32 (uint8, int32, int16, bool8, float64...)");
+                }
             }
             else if (argument == L"-row")
             {
@@ -2314,12 +2615,12 @@ int Main(int argc, wchar_t** argv)
     // Deduce conversion mode from filename extension.
     if (conversionMode == ConversionMode::Unknown)
     {
-        FileExtensionType inputFileExtensionType = GetFileExtensionType(std::wstring_view(inputFilename));
-        FileExtensionType outputFileExtensionType = GetFileExtensionType(std::wstring_view(outputFilename));
-        conversionMode = GetConversionModeFromFileExtensionType(inputFileExtensionType);
+        FileType inputFileType = GetFileType(std::wstring_view(inputFilename));
+        FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
+        conversionMode = GetConversionModeFromFileType(inputFileType);
         if (conversionMode == ConversionMode::Unknown)
         {
-            conversionMode = GetConversionModeFromFileExtensionType(outputFileExtensionType);
+            conversionMode = GetConversionModeFromFileType(outputFileType);
         }
     }
 
@@ -2331,7 +2632,7 @@ int Main(int argc, wchar_t** argv)
         inputFilename.c_str(),
         outputFilename.c_str(),
         g_conversionModeNames[uint32_t(conversionMode)]
-        );
+    );
 
     if (conversionMode == ConversionMode::Tensor)
     {
