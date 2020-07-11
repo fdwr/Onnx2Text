@@ -21,6 +21,7 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
     ConvertOnnxModel.exe -tensor -datatype uint16 foo.dat con.csv // raw data array to CSV screen
     ConvertOnnxModel.exe input.npy output.onnxtensor // NumPy array to ONNX tensor
     ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy // dump graph to tensors
+    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate:random,1,24 output.onnxtensor
 
 # Parameters
 * input/output files: graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
@@ -41,6 +42,12 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
 csv/dat).
 * .png - Portable Network Graphics image file.
 * .dat/.bin - Raw binary data.
+* generator: - Generator tensor input pseudo filename\r\n"
+    * generator:ones - all ones. [1,1,1,1...]\r\n"
+    * generator:zeros - all zeros [0,0,0,0...]\r\n"
+    * generator:values(,value) - specific value [3,3,3,3...]\r\n"
+    * generator:iota(,startingvalue) - increasing sequence [0,1,2,3...]\r\n"
+    * generator:random(,min(,max)) - random values between min/max [31,56,2,69...]\r\n"
 
 # Building
 Load Visual Studio solution (ConvertOnnxModel.sln), and build.
