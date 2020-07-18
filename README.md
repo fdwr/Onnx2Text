@@ -2,8 +2,9 @@ ConvertOnnxModel
 2018-07-19..2020-07-10
 Dwayne Robinson (FDwR)  
 
-Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
-Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
+- Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
+- Converts an ONNX tensor protobuf to text/CSV/PNG/NPY and vice versa.
+- Generates output tensor values (ones, zeros, series, random).
 
 # Usage
     ConvertOnnxModel.exe [options] inputFilename [outputFilename]
@@ -41,7 +42,7 @@ Can also convert input/output tensor protobuf to CSV/PNG and vice versa.
 * .csv - Comma separated value. Contain raw values, no dimensions. The dimensions should be specified if input.
 csv/dat).
 * .png - Portable Network Graphics image file.
-* .dat/.bin - Raw binary data.
+* .dat/.bin - Raw binary data (no header, just contiguous array elements).
 * generator: - Generator tensor input pseudo filename\r\n"
     * generator:ones - all ones. [1,1,1,1...]\r\n"
     * generator:zeros - all zeros [0,0,0,0...]\r\n"
