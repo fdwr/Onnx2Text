@@ -1514,8 +1514,12 @@ void WriteNpy(
     headerFixedPart.dictionaryLength = static_cast<uint16_t>(headerLength - sizeof(headerFixedPart));
     fileData.append(reinterpret_cast<const char*>(&headerFixedPart), sizeof(headerFixedPart));
     fileData.append(dictionaryWriter.GetText());
-    fileData.push_back('\x000A'); // Terminate with new line.
     fileData.append(headerLength - fileData.size(), ' ');
+    fileData.back() = '\x000A'; // Terminate with new line.
+    // Note the spec says "It is terminated by a newline (\n) and padded with spaces (\x20)",
+    // but that's wrong. It's actually "padding with spaces and then terminated by a newline".
+    // Otherwise Numpy 1.18.5 barfs (1.19 works fine either way).
+    // https://numpy.org/devdocs/reference/generated/numpy.lib.format.html
 
     fileData.append(arrayByteData.begin(), arrayByteData.end());
 }
@@ -2441,8 +2445,8 @@ void PrintUsage()
                  "        -column - single column or range for .csv.\r\n"
                  "\r\n"
                  "File types:\r\n"
-                 "    .onnx - ONNX model protobuf\r\n"
-                 "    .onnxtensor - ONNX tensor\r\n"
+                 "    .onnx - Open Neural Exchange model protobuf\r\n"
+                 "    .onnxtensor - Open Neural Exchange tensor\r\n"
                  "    .pb  - Google Protobuf (unstated type, might be tensor)\r\n"
                  "    .txt - Text\r\n"
                  "    .csv - Comma Separate Value\r\n"
