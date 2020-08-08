@@ -194,6 +194,7 @@ auto clamped_span(ContainerType& oldSpan, size_t offset, size_t count) -> span<d
     return span<NewType>(p + beginOffset, p + endOffset);
 }
 
+// Reads a byte array from std::vector/std::string/std::array as a struct.
 template <typename NewStructType, typename OldTypeContainer>
 const NewStructType& read_as(OldTypeContainer&& oldSpan)
 {
@@ -219,6 +220,14 @@ bool starts_with(ContainerType1&& fullSequence, ContainerType2&& prefix)
 {
     return fullSequence.size() >= prefix.size()
         && std::equal(fullSequence.begin(), fullSequence.begin() + prefix.size(), prefix.begin(), prefix.end());
+}
+
+// e.g. starts_with(some_string_view, "prefix");
+template <typename ContainerType1, typename ContainerType2>
+bool ends_with(ContainerType1&& fullSequence, ContainerType2&& suffix)
+{
+    return fullSequence.size() >= suffix.size()
+        && std::equal(fullSequence.end() -  + suffix.size(), fullSequence.end(), suffix.begin(), suffix.end());
 }
 
 template <typename ContainerType>
@@ -321,7 +330,7 @@ FileType GetFileType(std::wstring_view filename)
 {
     size_t extensionOffset = GetFileExtensionOffset(filename);
     std::wstring_view filenameExtension = filename.substr(extensionOffset);
-    if (starts_with(filename, std::wstring_view(L"generate:"))) return FileType::TensorGenerator;
+    if (starts_with(filename, std::wstring_view(L"generate("))) return FileType::TensorGenerator;
     if (filenameExtension == L"pb"  ) return FileType::GoogleProtobuf;
     if (filenameExtension == L"onnx") return FileType::OnnxModel;
     if (filenameExtension == L"txt" ) return FileType::Text;
@@ -1862,7 +1871,7 @@ void ConvertElementTypeToUInt8(
     for (; elementCount != 0; --elementCount)
     {
         T const* recastSource = reinterpret_cast<T const*>(source);
-        *destination++ = static_cast<uint8_t>(*recastSource);
+        *destination++ = static_cast<uint8_t>(*recastSource * 255);
         source += sourceElementByteStride;
     }
 }
@@ -2097,13 +2106,15 @@ void GenerateTensorSequence(
     arrayByteData.clear();
     arrayByteData.resize(GetByteSizeFromDimensions(dimensions, dataType));
 
-    // Strip off "generate:".
-    if (!starts_with(fileName, std::wstring_view(L"generate:")))
+    // Strip off "generate(".
+    if (!starts_with(fileName, std::wstring_view(L"generate("))
+    ||  !ends_with(fileName, std::wstring_view(L")")))
     {
         return;
     }
     span<const wchar_t> generatorType = fileName;
     generatorType.pop_front(9);
+    generatorType.pop_back(1);
 
     // Tokenize using commas.
     std::vector<span<const wchar_t>> tokens = tokenize(generatorType, L',');
@@ -2156,6 +2167,7 @@ void GenerateTensorSequence(
     else if (equals(tokens.front(), std::wstring_view(L"iota")))
     {
         float startingValue = (tokens.size() > 1) ? GetFloatNumberFromToken(tokens[1]) : 0.0f;
+        float increment = (tokens.size() > 2) ? GetFloatNumberFromToken(tokens[2]) : 1.0f;
 
         std::function<ScalarValueUnion()> getter;
         if (isFloatingPointDataType)
@@ -2164,7 +2176,7 @@ void GenerateTensorSequence(
             getter = [&]()->ScalarValueUnion
             {
                 ScalarValueUnion newValueUnion = valueUnion;
-                ++valueUnion.floatValue;
+                valueUnion.floatValue += increment;
                 return newValueUnion;
             };
         }
@@ -2174,7 +2186,7 @@ void GenerateTensorSequence(
             getter = [&]()->ScalarValueUnion
             {
                 ScalarValueUnion newValueUnion = valueUnion;
-                ++valueUnion.intValue;
+                valueUnion.intValue += int64_t(increment);
                 return newValueUnion;
             };
         }
@@ -2210,6 +2222,10 @@ void GenerateTensorSequence(
         }
 
         WriteTensorValues(/*out*/ reinterpret_span<uint8_t>(arrayByteData), dataType, getter);
+    }
+    else
+    {
+        throw std::invalid_argument("Not a valid mode for generate().");
     }
 }
 
@@ -2429,7 +2445,7 @@ void PrintUsage()
                  "    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat\r\n"
                  "    ConvertOnnxModel.exe input.npy output.onnxtensor\r\n"
                  "    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy\r\n"
-                 "    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate:random,1,24 output.onnxtensor\r\n"
+                 "    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
                  "\r\n"
                  "Parameters:\r\n"
                  "     input file - graph (onnx/pb/text) or tensor (onnxtensor/pb/npy/text/csv/dat/generate)\r\n"
@@ -2454,12 +2470,12 @@ void PrintUsage()
                  "    .jpg - Image (Joint Photographic Experts Group)\r\n"
                  "    .npy - NumPyArray single tensor\r\n"
                  "    .dat/.bin - Raw binary array (no header)\r\n"
-                 "    generator: - Generator pseudo filename\r\n"
-                 "      generator:ones - all ones. [1,1,1,1...]\r\n"
-                 "      generator:zeros - all zeros [0,0,0,0...]\r\n"
-                 "      generator:values(,value) - specific value [3,3,3,3...]\r\n"
-                 "      generator:iota(,startingvalue) - increasing sequence [0,1,2,3...]\r\n"
-                 "      generator:random(,min(,max)) - random values between min/max [31,56,2,69...]\r\n"
+                 "    generate(...) - Generator pseudo filename\r\n"
+                 "      generate(ones) - all ones. [1,1,1,1...]\r\n"
+                 "      generate(zeros) - all zeros [0,0,0,0...]\r\n"
+                 "      generate(values,value) - specific value [3,3,3,3...]\r\n"
+                 "      generate(iota,startingvalue) - increasing sequence [0,1,2,3...]\r\n"
+                 "      generate(random,min,max) - random values between min/max [31,56,2,69...]\r\n"
                  ;
 }
 
