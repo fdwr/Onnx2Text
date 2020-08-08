@@ -47,7 +47,7 @@ csv/dat).
     * generate(ones) - all ones. [1,1,1,1...]
     * generate(zeros) - all zeros [0,0,0,0...]
     * generate(values,value) - specific value [3,3,3,3...]
-    * generate(iota,startingvalue) - increasing sequence [0,1,2,3...]
+    * generate(iota,startingvalue,increment) - increasing sequence [0,1,2,3...]
     * generate(random,min,max) - random values between min/max [31,56,2,69...]
 
 # Building
