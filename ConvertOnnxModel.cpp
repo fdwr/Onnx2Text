@@ -342,6 +342,7 @@ FileType GetFileType(std::wstring_view filename)
     if (filenameExtension == L"jpeg") return FileType::Image;
     if (filenameExtension == L"npy")  return FileType::NumPyArray;
     if (filenameExtension == L"onnxtensor") return FileType::OnnxTensor;
+    if (filenameExtension == L"tensorproto") return FileType::OnnxTensor;
     return FileType::Unknown;
 }
 
@@ -895,9 +896,9 @@ void RearrangeChannels(
     const uint32_t batchCount     = ComputeElementCount(batchDimensions);
     const uint32_t totalByteCount = destinationElementByteSize * channelCount * heightCount * widthCount * batchCount;
 
-    if (totalByteCount != destinationPixelBytes.size())
+    if (totalByteCount > destinationPixelBytes.size())
     {
-        throw std::invalid_argument("Pixel total byte count does not match dimension counts.");
+        throw std::invalid_argument("Pixel total byte count exceeds dimension counts.");
     }
 
     size_t destinationByteOffset = 0;
@@ -1871,7 +1872,7 @@ void ConvertElementTypeToUInt8(
     for (; elementCount != 0; --elementCount)
     {
         T const* recastSource = reinterpret_cast<T const*>(source);
-        *destination++ = static_cast<uint8_t>(*recastSource * 255);
+        *destination++ = static_cast<uint8_t>(*recastSource);
         source += sourceElementByteStride;
     }
 }
