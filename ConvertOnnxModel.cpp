@@ -310,7 +310,7 @@ enum class FileType
     Unknown,             // .onnx
     OnnxModel,           // .onnx
     GoogleProtobuf,      // .pb
-    Text,                // .txt
+    Text,                // .txt / .prototxt
     CommaSeparatedValue, // .csv
     Image,               // .png / .jpg
     RawData,             // .dat / .bin - raw binary, dump of tensor values as-is
@@ -334,6 +334,7 @@ FileType GetFileType(std::wstring_view filename)
     if (filenameExtension == L"pb"  ) return FileType::GoogleProtobuf;
     if (filenameExtension == L"onnx") return FileType::OnnxModel;
     if (filenameExtension == L"txt" ) return FileType::Text;
+    if (filenameExtension == L"prototxt" ) return FileType::Text;
     if (filenameExtension == L"csv" ) return FileType::CommaSeparatedValue;
     if (filenameExtension == L"dat" ) return FileType::RawData;
     if (filenameExtension == L"bin" ) return FileType::RawData;
@@ -2440,7 +2441,7 @@ void PrintUsage()
     std::cout << "ConvertOnnxModel 2018-07-19..2020-07-11 FDR\r\n"
                  "Example usage:\r\n"
                  "    ConvertOnnxModel.exe input.onnx output.txt\r\n"
-                 "    ConvertOnnxModel.exe input.txt output.onnx\r\n"
+                 "    ConvertOnnxModel.exe input.prototxt output.onnx\r\n"
                  "    ConvertOnnxModel.exe input.onnxtensor output.csv\r\n"
                  "    ConvertOnnxModel.exe -tensor input.pb output.png\r\n"
                  "    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat\r\n"
@@ -2465,7 +2466,7 @@ void PrintUsage()
                  "    .onnx - Open Neural Exchange model protobuf\r\n"
                  "    .onnxtensor - Open Neural Exchange tensor\r\n"
                  "    .pb  - Google Protobuf (unstated type, might be tensor)\r\n"
-                 "    .txt - Text\r\n"
+                 "    .txt/.prototxt - Protobuf text\r\n"
                  "    .csv - Comma Separate Value\r\n"
                  "    .png - Image (Portable Network Graphics)\r\n"
                  "    .jpg - Image (Joint Photographic Experts Group)\r\n"
