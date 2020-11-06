@@ -5,50 +5,69 @@ Dwayne Robinson (FDwR)
 - Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
 - Converts an ONNX tensor protobuf to text/CSV/PNG/NPY and vice versa.
 - Generates output tensor values (ones, zeros, iota series, random).
+- Exports model tensors to directory of tensor files.
 
 # Usage
     ConvertOnnxModel.exe [options] inputFilename [outputFilename]
 
 # Example usage
-    ConvertOnnxModel.exe input.onnx output.txt // ONNX model binary file to text representation
-    ConvertOnnxModel.exe input.txt output.onnx // ONNX model text representation to binary file
-    ConvertOnnxModel.exe -tensor Foo.pb Foo.csv // Tensor protobuf file to comma separated values
-    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat
-    ConvertOnnxModel.exe -tensor file.pb file.txt // Tensor brotobuf to text
-    ConvertOnnxModel.exe -tensor file.pb file.png // Tensor protobuf to PNG image
-    ConvertOnnxModel.exe -tensor file.png file.pb // PNG image to tensor protobuf
-    ConvertOnnxModel.exe -tensor -dimensions 3,480,640 file.csv file.png // CSV to PNG with dimensions
-    ConvertOnnxModel.exe -tensor -datatype float64 food.csv foo.dat // CSV file to raw data array
-    ConvertOnnxModel.exe -tensor -datatype uint16 foo.dat con.csv // raw data array to CSV screen
-    ConvertOnnxModel.exe input.npy output.onnxtensor // NumPy array to ONNX tensor
-    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy // dump graph to tensors
-    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor
+
+- Model to model
+    - Model from ONNX binary protobuf format to prototxt format  
+        `ConvertOnnxModel input.onnx output.prototxt`
+    - Model in prototxt text format to binary protobuf ONNX format  
+        `ConvertOnnxModel input.prototxt output.onnx`
+    - Model from ONNX binary protobuf back to binary with zeroed tensor values  
+        `ConvertOnnxModel -zeromodelvalues input.onnx output.onnx`
+
+- Model to multiple tensors
+    - Model from ONNX binary protobuf format to directory of NumPy tensors  
+        `ConvertOnnxModel resnet50.onnx x:\resnet_*.npy`
+    - Model from ONNX binary protobuf format to directory of raw data files  
+        `ConvertOnnxModel squeezenet.onnx z:\folder\*_weight.dat`
+
+- Tensor to tensor
+    - Tensor from ONNX binary protobuf to comma separated values  
+        `ConvertOnnxModel input.onnxtensor output.csv`
+    - Tensor from ONNX binary protobuf (.pb) to image file  
+        `ConvertOnnxModel -tensor input.pb output.png`
+    - Tensor data as comma separated values to raw binary file  
+        `ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
+    - Tensor from NumPy array format to protobuf ONNX binary format  
+        `ConvertOnnxModel input.npy output.onnxtensor`
+
+- Tensor from generated randomness to ONNX binary protobuf format  
+    `ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
 
 # Parameters
-* input/output files: graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
-* -tensor: convert tensor instead of graph.
-* -graph: convert graph (default).
-* -dimensions: explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data.
-* -datatype: tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8,complex64,complex128). This isn't usually needed unless reading from raw data.
-* -row: single row or range for .csv.
-* -column: single column or range for .csv.
+* input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
+* -tensor - specifies the input file is a tensor (only needed if ambiguous file type like .pb)
+* -graph - specifies the input file is a model (only needed if ambiguous file type like .pb)
+* -dimensions - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data.
+* -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
+* -zeromodelvalues - zero any tensor values in model (clears model initializer weights)
+* -row - single row or range for .csv.
+* -column - single column or range for .csv.
 
 # File Types
-* .onnx - Open Neural Network Exchange model/graph binary file.
-* .onnxtensor - ONNX tensor as binary Google protobuf file.
-* .txt - Open Neural Network Exchange model/graph text file.
-* .pb - Protobuf binary file, either tensor or graph (depending on -tensor or -graph). The dimensions are data type are contained in the file.
-* .npy - NumPy NEP array format for numpy.load().
-* .csv - Comma separated value. Contain raw values, no dimensions. The dimensions should be specified if input.
-csv/dat).
-* .png - Portable Network Graphics image file.
-* .dat/.bin - Raw binary data (no header, just contiguous array elements).
-* generate(): - Generator tensor input pseudo filename
-    * generate(ones) - all ones. [1,1,1,1...]
-    * generate(zeros) - all zeros [0,0,0,0...]
-    * generate(values,3) - specific value [3,3,3,3...]
-    * generate(iota,1,2) - increasing sequence [1,3,5...]
-    * generate(random,1,100) - random values between min/max [31,56,2,69...]
+* Model file types:
+    * .onnx - Open Neural Exchange model protobuf
+    * .pb - Google Protobuf (with -graph)
+    * .txt/.prototxt - Protobuf text
+* Tensor file types:
+    * .onnxtensor - Open Neural Exchange tensor
+    * .pb - Google Protobuf (with -tensor)
+    * .csv - Comma Separate Values (no dimensions, just data)
+    * .png - Image (Portable Network Graphics)
+    * .jpg - Image (Joint Photographic Experts Group)
+    * .npy - NumPyArray single tensor
+    * .dat/.bin - Raw binary data (no header, just contiguous array elements)
+    * generate() - Generator tensor input pseudo filename:
+        * generate(ones) - all ones. [1,1,1,1...]
+        * generate(zeros) - all zeros [0,0,0,0...]
+        * generate(values,3) - specific value [3,3,3,3...]
+        * generate(iota,1,2) - increasing sequence [1,3,5...]
+        * generate(random,1,100) - random values between min/max [31,56,2,69...]
 
 # Building
 Load Visual Studio solution (ConvertOnnxModel.sln), and build.

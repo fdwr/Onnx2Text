@@ -1556,7 +1556,7 @@ void CopyOnnxTensorDataToBuffer(
     }
 }
 
-std::string GetOnnxTensorRawByteData(onnx::TensorProto tensor)
+std::string GetOnnxTensorRawByteData(onnx::TensorProto const& tensor)
 {
     std::string values;
     if (tensor.has_raw_data())
@@ -1628,15 +1628,37 @@ void PrintTensorInfo(
     }
 }
 
+void ZeroModelTensorWeights(onnx::ModelProto& model)
+{
+    onnx::GraphProto* graphProto = model.mutable_graph();
+    auto initializerSize = graphProto->initializer_size();
+    for (int i = 0; i < initializerSize; ++i)
+    {
+        onnx::TensorProto* onnxTensor = graphProto->mutable_initializer(i);
+
+        std::string tensorValues = GetOnnxTensorRawByteData(*onnxTensor);
+        onnxTensor->clear_int32_data();
+        onnxTensor->clear_int64_data();
+        onnxTensor->clear_uint64_data();
+        onnxTensor->clear_float_data();
+        onnxTensor->clear_double_data();
+        std::fill(tensorValues.begin(), tensorValues.end(), 0);
+        onnxTensor->set_raw_data(tensorValues.data(), tensorValues.size());
+    }
+}
+
 void ConvertModel(
     _In_z_ wchar_t const* inputFilename,
-    _In_z_ wchar_t const* outputFilename
+    _In_z_ wchar_t const* outputFilename,
+    bool shouldZeroModelValues
     )
 {
     FileType inputFileType  = GetFileType(std::wstring_view(inputFilename));
     FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
 
     onnx::ModelProto model;
+
+    // Read the input file.
 
     bool succeeded = false;
     if (inputFileType == FileType::Text)
@@ -1665,6 +1687,13 @@ void ConvertModel(
     {
         throw std::ios::failure("Could not parse input graph file.");
     }
+
+    if (shouldZeroModelValues)
+    {
+        ZeroModelTensorWeights(/*inout*/ model);
+    }
+
+    // Write the output file (either another model or directory of tensors).
 
     if (outputFileType == FileType::Text)
     {
@@ -2438,46 +2467,77 @@ void ConvertTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "ConvertOnnxModel 2018-07-19..2020-07-11 FDR\r\n"
+    std::cout << "ConvertOnnxModel 2018-07-19..2020-11-05 FDwR\r\n"
+                 "\r\n"
+                 "Converts:\r\n"
+                 "    - binary ONNX model file to proto text and back.\r\n"
+                 "    - tensors to/from prototext/ONNX/CSV/PNG/NPY and vice versa.\r\n"
+                 "    - generated values to output tensor (ones, zeros, iota series, random).\r\n"
+                 "    - model to directory of tensor files.\r\n"
+                 "\r\n"
                  "Example usage:\r\n"
-                 "    ConvertOnnxModel.exe input.onnx output.txt\r\n"
-                 "    ConvertOnnxModel.exe input.prototxt output.onnx\r\n"
-                 "    ConvertOnnxModel.exe input.onnxtensor output.csv\r\n"
-                 "    ConvertOnnxModel.exe -tensor input.pb output.png\r\n"
-                 "    ConvertOnnxModel.exe -tensor -dimensions 224,224 -datatype uint8 -row 2 -column 1,225 Foo.csv Foo.dat\r\n"
-                 "    ConvertOnnxModel.exe input.npy output.onnxtensor\r\n"
-                 "    ConvertOnnxModel.exe resnet50.onnx x:\\resnet_*.npy\r\n"
-                 "    ConvertOnnxModel.exe -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
+                 "\r\n"
+                 "    ConvertOnnxModel.exe -options inputfile outputfile\r\n"
+                 "\r\n"
+                 "    Model from ONNX binary protobuf format to prototxt format\r\n"
+                 "        ConvertOnnxModel input.onnx output.prototxt\r\n"
+                 "    Model in prototxt text format to binary protobuf ONNX format\r\n"
+                 "        ConvertOnnxModel input.prototxt output.onnx\r\n"
+                 "    Model from ONNX binary protobuf back to binary with zeroed tensor values\r\n"
+                 "        ConvertOnnxModel -zeromodelvalues input.onnx output.onnx\r\n"
+                 "\r\n"
+                 "    Model from ONNX binary protobuf format to directory of NumPy tensors\r\n"
+                 "        ConvertOnnxModel resnet50.onnx x:\\resnet_*.npy\r\n"
+                 "    Model from ONNX binary protobuf format to directory of raw data files\r\n"
+                 "        ConvertOnnxModel squeezenet.onnx z:\\folder\\*_weight.dat\r\n"
+                 "\r\n"
+                 "    Tensor from ONNX binary protobuf to comma separated values\r\n"
+                 "        ConvertOnnxModel input.onnxtensor output.csv\r\n"
+                 "    Tensor from ONNX binary protobuf (.pb) to image file\r\n"
+                 "        ConvertOnnxModel -tensor input.pb output.png\r\n"
+                 "    Tensor data as comma separated values to raw binary file\r\n"
+                 "        ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat\r\n"
+                 "    Tensor from NumPy array format to protobuf ONNX binary format\r\n"
+                 "        ConvertOnnxModel input.npy output.onnxtensor\r\n"
+                 "\r\n"
+                 "    Tensor from generated randomness to ONNX binary protobuf format\r\n"
+                 "        ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
                  "\r\n"
                  "Parameters:\r\n"
-                 "     input file - graph (onnx/pb/text) or tensor (onnxtensor/pb/npy/text/csv/dat/generate)\r\n"
-                 "    output file - graph (onnx/pb/text) or tensor (onnxtensor/pb/npy/text/csv/dat)\r\n"
-                 "        -tensor - convert tensor instead of graph (if can't tell from file extension).\r\n"
-                 "         -graph - convert graph (default).\r\n"
-                 "    -dimensions - explicit tensor dimensions for .csv or .dat file. Defaults to\r\n"
-                 "                  1D element count from source data.\r\n"
-                 "      -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
-                 "                  uint16,int32,uint32,int64,uint64,bool8,complex64,complex128).\r\n"
-                 "        -rawhex - display as raw hexadecimal when writing .csv\r\n"
-                 "           -row - single row or range for .csv.\r\n"
-                 "        -column - single column or range for .csv.\r\n"
+                 "        inputfile - either a graph or tensor (see file types below)\r\n"
+                 "       outputfile - either a graph or tensor (see file types below)\r\n"
+                 "          -tensor - specifies the input file is a tensor\r\n"
+                 "                    (only needed if can't tell from file extension, like with .pb).\r\n"
+                 "           -graph - specifies the input file is a graph model\r\n"
+                 "                    (only needed if can't tell from file extension, like with .pb).\r\n"
+                 "      -dimensions - explicit tensor dimensions for .csv or .dat file which do not\r\n"
+                 "                    store dimensions internally. Defaults to 1D otherwise.\r\n"
+                 "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
+                 "                    uint16,int32,uint32,int64,uint64,bool8).\r\n"
+                 " -zeromodelvalues - zero any tensor values (clears model initializer weights)\r\n"
+                 "          -rawhex - display as raw hexadecimal when writing .csv\r\n"
+                 "             -row - single row or range for .csv\r\n"
+                 "          -column - single column or range for .csv\r\n"
                  "\r\n"
                  "File types:\r\n"
-                 "    .onnx - Open Neural Exchange model protobuf\r\n"
-                 "    .onnxtensor - Open Neural Exchange tensor\r\n"
-                 "    .pb  - Google Protobuf (unstated type, might be tensor)\r\n"
-                 "    .txt/.prototxt - Protobuf text\r\n"
-                 "    .csv - Comma Separate Value\r\n"
-                 "    .png - Image (Portable Network Graphics)\r\n"
-                 "    .jpg - Image (Joint Photographic Experts Group)\r\n"
-                 "    .npy - NumPyArray single tensor\r\n"
-                 "    .dat/.bin - Raw binary array (no header)\r\n"
-                 "    generate(...) - Generator pseudo filename\r\n"
-                 "      generate(ones) - all ones. [1,1,1,1...]\r\n"
-                 "      generate(zeros) - all zeros [0,0,0,0...]\r\n"
-                 "      generate(values,3) - specific value [3,3,3,3...]\r\n"
-                 "      generate(iota,1,2) - increasing sequence [1,3,5...]\r\n"
-                 "      generate(random,1,100) - random values between min/max [31,56,2,69...]\r\n"
+                 "    Model file types:\r\n"
+                 "        .onnx - Open Neural Exchange model protobuf\r\n"
+                 "        .pb - Google Protobuf (with -graph)\r\n"
+                 "        .txt/.prototxt - Protobuf text\r\n"
+                 "    Tensor file types:\r\n"
+                 "        .onnxtensor - Open Neural Exchange tensor\r\n"
+                 "        .pb - Google Protobuf (with -tensor)\r\n"
+                 "        .csv - Comma Separate Value\r\n"
+                 "        .png - Image (Portable Network Graphics)\r\n"
+                 "        .jpg - Image (Joint Photographic Experts Group)\r\n"
+                 "        .npy - NumPyArray single tensor\r\n"
+                 "        .dat/.bin - Raw binary array (no header)\r\n"
+                 "        generators - pseudo input filename:\r\n"
+                 "            generate(ones) - all ones [1,1,1,1...]\r\n"
+                 "            generate(zeros) - all zeros [0,0,0,0...]\r\n"
+                 "            generate(values,3) - specific value [3,3,3,3...]\r\n"
+                 "            generate(iota,1,2) - increasing sequence [1,3,5...]\r\n"
+                 "            generate(random,1,100) - random values between min/max [31,56,2,69...]\r\n"
                  ;
 }
 
@@ -2539,6 +2599,7 @@ int Main(int argc, wchar_t** argv)
     onnx::TensorProto::DataType dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     HalfOpenRangeUint32 rowRange = {}, columnRange = {};
     bool shouldPrintRawBytes = false;
+    bool shouldZeroModelValues = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -2599,6 +2660,10 @@ int Main(int argc, wchar_t** argv)
             {
                 shouldPrintRawBytes = true;
             }
+            else if (argument == L"-zeromodelvalues")
+            {
+                shouldZeroModelValues = true;
+            }
             else
             {
                 throw std::invalid_argument("Unknown argument.");
@@ -2658,6 +2723,11 @@ int Main(int argc, wchar_t** argv)
 
     if (conversionMode == ConversionMode::Tensor)
     {
+        if (shouldZeroModelValues)
+        {
+            throw std::invalid_argument("\"-zeromodelvalues\" passed but input was not a model.");
+        }
+
         ConvertTensor(
             inputFilename.c_str(),
             dimensions,
@@ -2681,7 +2751,7 @@ int Main(int argc, wchar_t** argv)
             throw std::invalid_argument("\"-datatype\" may only be specified for \"-tensor\" conversion.");
         }
 
-        ConvertModel(inputFilename.c_str(), outputFilename.c_str());
+        ConvertModel(inputFilename.c_str(), outputFilename.c_str(), shouldZeroModelValues);
     }
     else // conversionMode == ConversionMode::Unknown
     {
