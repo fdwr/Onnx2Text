@@ -185,9 +185,10 @@ span<NewType> reinterpret_span(OldTypeContainer& oldSpan)
 template <typename ContainerType>
 auto clamped_span(ContainerType& oldSpan, size_t offset, size_t count) -> span<decltype(*oldSpan.data())>
 {
+    using NewType = decltype(*oldSpan.data());
     size_t endOffset = offset + count;
     size_t maxOffset = oldSpan.size();
-    beginOffset = std::min(offset, maxOffset);
+    size_t beginOffset = std::min(offset, maxOffset);
     endOffset = (endOffset > maxOffset || endOffset < offset) ? maxOffset : endOffset;
 
     auto* p = oldSpan.data();
