@@ -2038,9 +2038,16 @@ void StoreImageData(
     {
         throw std::invalid_argument("Only .png is supported for writing files.");
     }
+    if (dimensions.empty())
+    {
+        throw std::invalid_argument("Dimensions are empty. They must be at least 1D for images.");
+    }
+    std::vector<int32_t> reshapedDimensions;
     if (dimensions.size() < 2)
     {
-        throw std::invalid_argument("Dimensions must be at least 2 for height and width.");
+        reshapedDimensions.assign(dimensions.begin(), dimensions.end());
+        reshapedDimensions.insert(reshapedDimensions.begin(), 2 - reshapedDimensions.size(), 1);
+        dimensions = reshapedDimensions;
     }
     // TODO: Support non-8bit pixel types.
     if (pixelFormatString != "b8g8r8")
