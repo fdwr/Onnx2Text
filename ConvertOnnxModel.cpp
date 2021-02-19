@@ -1713,6 +1713,7 @@ void ConvertModel(
     }
     else if (outputFileType == FileType::NumPyArray
           || outputFileType == FileType::OnnxTensor
+          || outputFileType == FileType::CommaSeparatedValue
           || outputFileType == FileType::RawData)
     {
         // enumerate all the tensor initializers, and dump their contents.
@@ -1765,6 +1766,15 @@ void ConvertModel(
                 {
                     std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
                     WriteBinaryFile(currentFileName.c_str(), arrayByteData);
+                }
+                break;
+
+            case FileType::CommaSeparatedValue:
+                {
+                    std::string text;
+                    std::string arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+                    WriteCsv(arrayByteData, onnxTensor.data_type(), /*shouldPrintRawBytes*/false, /*out*/ text);
+                    WriteBinaryFile(currentFileName.c_str(), text);
                 }
                 break;
 
