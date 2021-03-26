@@ -883,7 +883,7 @@ void RearrangeChannels(
     }
     if (dimensions.size() <= 2)
     {
-        return; // Nothing channels reorder since only 1 exists.
+        return; // No channels to reorder since only 1 channel exists.
     }
 
     std::vector<uint8_t> destinationPixelBytes(pixelBytes.size());
@@ -1029,6 +1029,10 @@ void MapNumPyArrayDataTypeToOnnx(
     onnx::TensorProto::DataType resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     uint32_t elementByteSize = 0;
 
+    #if !(defined(_M_IX86) || defined(_M_X64))
+    static_assert(false, "Double check that endianness is specified correctly for this architecture when using '='.");
+    #endif
+
     // https://docs.python.org/2/library/array.html#module-array
     // https://numpy.org/devdocs/reference/arrays.dtypes.html
     for (char c : numPyElementType)
@@ -1046,6 +1050,8 @@ void MapNumPyArrayDataTypeToOnnx(
         case 'd': resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE; break; // float64
         case '>': isBackwardsEndian = true; break;    // (backwards-endian)
         case '<': isBackwardsEndian = false; break;   // (logical-endian)
+        case '=': isBackwardsEndian = false; break;   // (logical-endian since targeting x86)
+        case '|': isBackwardsEndian = false; break;   // not applicable
 
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
@@ -2083,7 +2089,8 @@ void StoreImageData(
     uint32_t bytesPerChannel;
     if (!ResolvePixelFormat(channelCount, dataType, /*out*/ pixelFormatString, /*out*/ resolvedPixelFormatGuid, /*out*/ bytesPerChannel))
     {
-        throw std::invalid_argument("Pixel format is not supported for writing.");
+        printf("Channel count = %d\n", channelCount);
+        throw std::invalid_argument("Pixel format is not supported for writing. Verify the channel layout.");
     };
 
     ComPtr<IWICImagingFactory> wicFactory;
@@ -2536,6 +2543,7 @@ void PrintUsage()
                  "          -rawhex - display as raw hexadecimal when writing .csv\r\n"
                  "             -row - single row or range for .csv\r\n"
                  "          -column - single column or range for .csv\r\n"
+                 //"   -channellayout - either nchw or nhwc (needed for images)\r\n" // Not functional enough to enable yet.
                  "\r\n"
                  "File types:\r\n"
                  "    Model file types:\r\n"
@@ -2682,6 +2690,16 @@ int Main(int argc, wchar_t** argv)
             {
                 shouldZeroModelValues = true;
             }
+            #if 0 // Not functional enough to enable yet. todo: Rename to "layout", and ensure image conversion works.
+            else if (argument == L"-channellayout")
+            {
+                if (++i >= argc)
+                {
+                    throw std::invalid_argument("Channel layout string expected: -channellayout nchw (or nhwc)");
+                }
+                channelLayoutString = g_converterToUtf8.to_bytes(argv[i]);
+            }
+            #endif
             else
             {
                 throw std::invalid_argument("Unknown argument.");
