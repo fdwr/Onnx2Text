@@ -1175,11 +1175,12 @@ public:
 
     struct { span<const char> token; TokenType tokenType; } Read()
     {
+        static_assert(int(char(-42)) == int(unsigned char(-42)), "char must be unsigned. Signed char makes no freaking sense at all. Fix your compiler.");
         span<const char> token;
         TokenType tokenType = TokenType::End;
 
         // Skip spaces.
-        for (; !text_.empty() && isspace(text_.front()); text_.pop_front())
+        for (; !text_.empty() && isspace(unsigned char(text_.front())); text_.pop_front())
         {
         }
 
@@ -1453,7 +1454,7 @@ void ReadNpy(
     size_t dictionaryLength = (headerV1.majorVersion >= 2) ? headerV2.dictionaryLength : headerV1.dictionaryLength;
     size_t dataByteOffset = dictionaryOffset + dictionaryLength;
 
-    PythonDictionaryLexer lexer(fileData.subrange(dictionaryOffset, fileData.size_bytes()));
+    PythonDictionaryLexer lexer(fileData.subrange(dictionaryOffset, dataByteOffset));
     std::map<std::string_view, std::string_view> dictionary = lexer.ReadDictionary();
 
     bool isBackwardsEndian = false;
