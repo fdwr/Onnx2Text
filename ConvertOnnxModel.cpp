@@ -2611,7 +2611,7 @@ void ConvertTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "ConvertOnnxModel 2018-07-19..2020-11-05 FDwR\r\n"
+    std::cout << "ConvertOnnxModel 2018-07-19..2021-04-25 FDwR\r\n"
                  "\r\n"
                  "Converts:\r\n"
                  "    - binary ONNX model file to proto text and back.\r\n"
