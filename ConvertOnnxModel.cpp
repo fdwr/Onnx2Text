@@ -1090,8 +1090,8 @@ void SwapBytes(/*inout*/ span<uint8_t> arrayByteData, uint32_t elementByteSize)
             {
                 uint32_t v = u;
                 u = ((v & 0x000000FF) << 24) |
-                    ((v & 0x0000FF00) << 8);
-                    ((v & 0x00FF0000) >> 8);
+                    ((v & 0x0000FF00) << 8)  |
+                    ((v & 0x00FF0000) >> 8)  |
                     ((v & 0xFF000000) >> 24);
             }
 
