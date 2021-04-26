@@ -35,10 +35,10 @@ inline char* ToChar(std::byte* p) { return reinterpret_cast<char*>(p); }
 inline char const* ToChar(std::byte const* p) { return reinterpret_cast<char const*>(p); }
 inline char ToChar(char8_t c) { return static_cast<char>(c); }
 inline char* ToChar(char8_t* p) { return reinterpret_cast<char*>(p); }
-inline char const* const ToChar(char8_t const* const p) { return reinterpret_cast<char const* const>(p); }
+inline char const* ToChar(char8_t const* const p) { return reinterpret_cast<char const* const>(p); }
 inline char** ToChar(char8_t** p) { return reinterpret_cast<char**>(p); }
-inline char* const* const ToChar(char8_t* const* const p) { return reinterpret_cast<char* const* const>(p); }
-inline char const* const* const ToChar(char8_t const* const* const p) { return reinterpret_cast<char const* const* const>(p); }
+inline char* const* ToChar(char8_t* const* const p) { return reinterpret_cast<char* const* const>(p); }
+inline char const* const* ToChar(char8_t const* const* const p) { return reinterpret_cast<char const* const* const>(p); }
 inline unsigned char* ToUChar(char* p) { return reinterpret_cast<unsigned char*>(p); }
 inline unsigned char* ToUChar(char8_t* p) { return reinterpret_cast<unsigned char*>(p); }
 inline unsigned char* ToUChar(std::byte* p) { return reinterpret_cast<unsigned char*>(p); }
@@ -106,6 +106,8 @@ class span
 {
 public:
     span() = default;
+
+    constexpr span(span<T>& s) = default;
 
     template<typename ContiguousContainerType>
     constexpr span(ContiguousContainerType&& container)
@@ -425,24 +427,41 @@ size_t GetFileExtensionOffset(std::wstring_view filename)
     return extensionOffset;
 }
 
+struct Mapping
+{
+    std::wstring_view filenameExtension;
+    FileType fileType;
+};
+const static Mapping fileTypeMappings[] =
+{
+    {L"pb", FileType::GoogleProtobuf},
+    { L"onnx", FileType::OnnxModel },
+    { L"txt" , FileType::Text },
+    { L"prototxt" , FileType::Text },
+    { L"csv" , FileType::CommaSeparatedValue },
+    { L"dat" , FileType::RawData },
+    { L"bin" , FileType::RawData },
+    { L"png" , FileType::Image },
+    { L"jpg" , FileType::Image },
+    { L"jpeg", FileType::Image },
+    { L"npy" , FileType::NumPyArray },
+    { L"onnxtensor", FileType::OnnxTensor },
+    { L"tensorproto", FileType::OnnxTensor },
+};
+
 FileType GetFileType(std::wstring_view filename)
 {
     size_t extensionOffset = GetFileExtensionOffset(filename);
     std::wstring_view filenameExtension = filename.substr(extensionOffset);
     if (starts_with(filename, std::wstring_view(L"generate("))) return FileType::TensorGenerator;
-    if (filenameExtension == L"pb"  ) return FileType::GoogleProtobuf;
-    if (filenameExtension == L"onnx") return FileType::OnnxModel;
-    if (filenameExtension == L"txt" ) return FileType::Text;
-    if (filenameExtension == L"prototxt" ) return FileType::Text;
-    if (filenameExtension == L"csv" ) return FileType::CommaSeparatedValue;
-    if (filenameExtension == L"dat" ) return FileType::RawData;
-    if (filenameExtension == L"bin" ) return FileType::RawData;
-    if (filenameExtension == L"png" ) return FileType::Image;
-    if (filenameExtension == L"jpg" ) return FileType::Image;
-    if (filenameExtension == L"jpeg") return FileType::Image;
-    if (filenameExtension == L"npy")  return FileType::NumPyArray;
-    if (filenameExtension == L"onnxtensor") return FileType::OnnxTensor;
-    if (filenameExtension == L"tensorproto") return FileType::OnnxTensor;
+    for (auto& mapping : fileTypeMappings)
+    {
+        if (filenameExtension == mapping.filenameExtension)
+        {
+            return mapping.fileType;
+        }
+    }
+
     return FileType::Unknown;
 }
 
@@ -1004,7 +1023,7 @@ void RearrangeChannels(
     size_t destinationByteOffset = 0;
     size_t sourceOffset0 = 0, sourceOffset1 = 0, sourceOffset2 = 0, sourceOffset3 = 0;
 
-    uint32_t sourceStride0, sourceStride1, sourceStride2, sourceStride3;
+    uint32_t sourceStride0 = 0, sourceStride1 = 0, sourceStride2 = 0, sourceStride3 = 0;
     uint32_t count0 = 0, count1 = 0, count2 = 0, count3 = 0;
     if (desiredChannelLayoutString == u8"nchw")
     {
@@ -2548,7 +2567,8 @@ void ConvertTensor(
     if (outputFileType == FileType::Text)
     {
         std::string modelString;
-        if ((succeeded = google::protobuf::TextFormat::PrintToString(tensor, &modelString)))
+        succeeded = google::protobuf::TextFormat::PrintToString(tensor, &modelString);
+        if (succeeded)
         {
             WriteBinaryFile(outputFilename, modelString);
         }
@@ -2933,5 +2953,5 @@ int wmain(int argc, wchar_t** argv)
         return EXIT_FAILURE;
     }
 
-    return EXIT_SUCCESS;
+    // return EXIT_SUCCESS;
 }
