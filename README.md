@@ -45,7 +45,7 @@ Dwayne Robinson (FDwR)
 * -graph - specifies the input file is a model (only needed if ambiguous file type like .pb)
 * -dimensions - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data.
 * -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
-* -zeromodelvalues - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results)
+* -zeromodelvalues - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
 * -row - single row or range for .csv.
 * -column - single column or range for .csv.
 

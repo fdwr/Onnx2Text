@@ -1773,10 +1773,18 @@ void PrintTensorInfo(
 void ZeroModelTensorWeights(onnx::ModelProto& model)
 {
     onnx::GraphProto* graphProto = model.mutable_graph();
-    auto initializerSize = graphProto->initializer_size();
+    int initializerSize = graphProto->initializer_size();
     for (int i = 0; i < initializerSize; ++i)
     {
         onnx::TensorProto* onnxTensor = graphProto->mutable_initializer(i);
+
+        // Do not zero small 1D shape tensors, which would break model execution
+        // used by Reshape/Expand/ConstantOfShape.
+        auto dims = onnxTensor->dims();
+        if (dims.size() == 1 && std::all_of(dims.begin(), dims.end(), [](int64_t dim) {return dim <= 8; }))
+        {
+            continue;
+        }
 
         std::vector<std::byte> tensorValues = GetOnnxTensorRawByteData(*onnxTensor);
         onnxTensor->clear_int32_data();
