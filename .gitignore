@@ -21,14 +21,6 @@
 [Xx]64/
 [Xx]86/
 [Bb]uild/
-Win32_Debug/
-Win32_Release/
-x64_Debug/
-x64_Release/
-bin_Win32_Debug/
-bin_Win32_Release/
-bin_x64_Debug/
-bin_x64_Release/
 bld/
 [Bb]in/
 [Oo]bj/
@@ -41,19 +33,6 @@ bld/
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
-
-# NUNIT
-*.VisualState.xml
-TestResult.xml
-
-# Build Results of an ATL Project
-[Dd]ebugPS/
-[Rr]eleasePS/
-dlldata.c
-
-# DNX
-project.lock.json
-artifacts/
 
 *.ifc
 *_i.c
@@ -82,9 +61,6 @@ artifacts/
 *.pidb
 *.svclog
 *.scc
-
-# Chutzpah Test files
-_Chutzpah*
 
 # Visual C++ cache files
 ipch/
@@ -127,10 +103,6 @@ _NCrunch_*
 .*crunch*.local.xml
 nCrunchTemp_*
 
-# MightyMoose
-*.mm.*
-AutoTest.Net/
-
 # Web workbench (sass)
 .sass-cache/
 
@@ -163,7 +135,8 @@ publish/
 # NuGet Packages
 *.nupkg
 # The packages folder can be ignored because of Package Restore
-**/packages/*
+#**/packages/*
+packages/
 # except build/, which is used as an MSBuild target.
 !**/packages/build/
 # Uncomment if necessary however generally it will be regenerated when needed

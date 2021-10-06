@@ -150,9 +150,9 @@ public:
     span<T> last(size_t count) const noexcept { return span<T>(end_ - count, end_); }
 
     T& front() noexcept { return *begin_; }
-    T& back()  noexcept { return *end_; }
+    T& back()  noexcept { return *(end_ - 1); }
     T const& front() const noexcept { return *begin_; }
-    T const& back()  const noexcept { return *end_; }
+    T const& back()  const noexcept { return *(end_ - 1); }
     T consume_front() noexcept { return *begin_++; }
     T consume_back()  noexcept { return *--end_; }
     void pop_front() noexcept { ++begin_; }
@@ -748,6 +748,13 @@ void ReadCsv(std::u8string_view text, /*out*/std::vector<int32_t>& values)
     values.clear();
     const char8_t* begin = text.data();
     const char8_t* end = text.data() + text.size();
+
+    // Special case of empty dimensions.
+    if (text == u8"()")
+    {
+        return;
+    }
+
     while (begin != end)
     {
         char8_t* valueEnd;
@@ -855,17 +862,26 @@ void WriteCsv(
     }
 }
 
-std::vector<int32_t> ResolveEmptyDimensions(
+bool AreDimensionsSpecified(span<int32_t const> dimensions)
+{
+    return dimensions.size() != 1 || dimensions.back() >= 0;
+}
+
+std::vector<int32_t> ResolveUnspecifiedDimensions(
     span<int32_t const> defaultDimensions,
     span<std::byte const> byteData,
     onnx::TensorProto::DataType dataType
     )
 {
-    // Return a 1D array if no dimensions were given, equal to the element count.
-    std::vector<int32_t> resolvedDimensions(defaultDimensions.begin(), defaultDimensions.end());
+    std::vector<int32_t> resolvedDimensions;
 
-    if (resolvedDimensions.empty())
+    if (AreDimensionsSpecified(defaultDimensions))
     {
+        resolvedDimensions.assign(defaultDimensions.begin(), defaultDimensions.end());
+    }
+    else
+    {
+        // Return a 1D array if no dimensions were given, equal to the element count.
         size_t elementByteSize = GetDataTypeElementByteSize(dataType);
         size_t elementCount = byteData.size() / elementByteSize;
         resolvedDimensions.push_back(static_cast<int32_t>(elementCount));
@@ -2480,7 +2496,7 @@ void ConvertTensor(
     onnx::TensorProto tensor;
     std::vector<int32_t> resolvedDimensions(dimensions.begin(), dimensions.end());
 
-    if (!dimensions.empty())
+    if (AreDimensionsSpecified(dimensions))
     {
         if (inputFileType == FileType::Text
         ||  inputFileType == FileType::OnnxModel
@@ -2508,7 +2524,7 @@ void ConvertTensor(
     else if (inputFileType == FileType::RawData)
     {
         std::vector<std::byte> arrayByteData = ReadBinaryFile(inputFilename);
-        resolvedDimensions = ResolveEmptyDimensions(dimensions, arrayByteData, dataType);
+        resolvedDimensions = ResolveUnspecifiedDimensions(dimensions, arrayByteData, dataType);
 
         MakeTensor(arrayByteData, dataType, resolvedDimensions, u8"", /*out*/ tensor);
     }
@@ -2518,7 +2534,7 @@ void ConvertTensor(
         std::vector<std::byte> arrayByteData;
 
         ReadCsv(text, dataType, rowRange, columnRange, /*out*/ arrayByteData);
-        resolvedDimensions = ResolveEmptyDimensions(dimensions, arrayByteData, dataType);
+        resolvedDimensions = ResolveUnspecifiedDimensions(dimensions, arrayByteData, dataType);
         MakeTensor(arrayByteData, dataType, resolvedDimensions, u8"", /*out*/ tensor);
     }
     else if (inputFileType == FileType::NumPyArray)
@@ -2561,8 +2577,9 @@ void ConvertTensor(
 
     // Read the data type and dimensions back from the tensor.
     dataType = onnx::TensorProto::DataType(tensor.data_type());
-    if (resolvedDimensions.empty())
+    if (!AreDimensionsSpecified(dimensions))
     {
+        resolvedDimensions.clear();
         for (auto v : tensor.dims())
         {
             resolvedDimensions.push_back(static_cast<int32_t>(v));
@@ -2684,6 +2701,7 @@ void PrintUsage()
                  "                    (only needed if can't tell from file extension, like with .pb).\r\n"
                  "      -dimensions - explicit tensor dimensions for .csv or .dat file which do not\r\n"
                  "                    store dimensions internally. Defaults to 1D otherwise.\r\n"
+                 "                    Pass \"()\" to indicate a 0D scalar.\r\n"
                  "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
                  "                    uint16,int32,uint32,int64,uint64,bool8).\r\n"
                  " -zeromodelvalues - zero any tensor values (clears model initializer weights)\r\n"
@@ -2768,7 +2786,7 @@ int Main(int argc, wchar_t** argv)
     std::wstring inputFilename, outputFilename;
     std::u8string pixelFormatString, channelLayoutString;
     ConversionMode conversionMode = ConversionMode::Unknown;
-    std::vector<int32_t> dimensions;
+    std::vector<int32_t> dimensions = {-1};
     onnx::TensorProto::DataType dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     HalfOpenRangeUint32 rowRange = {}, columnRange = {};
     bool shouldPrintRawBytes = false;
@@ -2925,7 +2943,7 @@ int Main(int argc, wchar_t** argv)
     }
     else if (conversionMode == ConversionMode::Graph)
     {
-        if (!dimensions.empty())
+        if (AreDimensionsSpecified(dimensions))
         {
             throw std::invalid_argument("\"-dimensions\" may only be specified for \"-tensor\" conversion.");
         }
