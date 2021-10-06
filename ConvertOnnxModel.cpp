@@ -1162,7 +1162,9 @@ void MapNumPyArrayDataTypeToOnnx(
     onnx::TensorProto::DataType resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     uint32_t elementByteSize = 0;
 
-    #if !(defined(_M_IX86) || defined(_M_X64))
+    #if !(defined(_M_IX86) || defined(_M_X64) || defined(_M_ARM) || defined(_M_ARM64))
+    // Technically ARM machines can accept either, but the vast majority of ARM machines
+    // default to logical endian, including all 2021 Windows ones and Android phones.
     static_assert(false, "Double check that endianness is specified correctly for this architecture when using '='.");
     #endif
 

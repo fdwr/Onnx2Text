@@ -306,7 +306,7 @@
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <GenerateMapFile>true</GenerateMapFile>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <LinkErrorReporting>NoErrorReport</LinkErrorReporting>
     </Link>
   </ItemDefinitionGroup>
