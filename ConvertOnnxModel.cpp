@@ -340,6 +340,25 @@ auto tokenize(
     return v;
 }
 
+template<typename OutputType, typename InputType> OutputType clamp_cast(InputType input)
+{
+    // Determine the larger type to decide which numeric limits to clamp to.
+    using InputLimits = std::numeric_limits<InputType>;
+    using OutputLimits = std::numeric_limits<OutputType>;
+    constexpr int inputMaxDigits = std::max(InputLimits::max_exponent, InputLimits::digits);
+    constexpr int outputMaxDigits = std::max(OutputLimits::max_exponent, OutputLimits::digits);
+    constexpr bool isEitherTypeUnsigned = std::is_unsigned_v<InputType> || std::is_unsigned_v<OutputType>;
+    constexpr bool isOutputTypeLarger = outputMaxDigits > inputMaxDigits;
+
+    InputType lowestValue  = isEitherTypeUnsigned ? static_cast<InputType>(0) :
+                             isOutputTypeLarger ? InputLimits::lowest() :
+                             static_cast<InputType>(OutputLimits::lowest());
+    InputType highestValue = isOutputTypeLarger ? InputLimits::max() :
+                             static_cast<InputType>(OutputLimits::max());
+
+    return static_cast<OutputType>(std::clamp<InputType>(input, lowestValue, highestValue));
+}
+
 // Read the file, calling back to set the size and return a span to the data to write into.
 void ReadBinaryFileWithCallback(
     wchar_t const* inputFilename,
@@ -1147,6 +1166,90 @@ void SwapBytes(/*inout*/ span<uint8_t> arrayByteData, uint32_t elementByteSize)
             }
         }
         break;
+    }
+}
+
+template<typename DataType>
+void RescaleArray(
+    double scale,
+    /*inout*/ span<std::byte> arrayByteData
+    )
+{
+    auto recastedData = reinterpret_span<DataType>(arrayByteData);
+    constexpr double lowestValue  = double(std::numeric_limits<DataType>::lowest());
+    constexpr double highestValue = double(std::numeric_limits<DataType>::max());
+    auto functor = [=](DataType& v)
+    {
+        double clampedValue = std::clamp<double>(scale * v, lowestValue, highestValue);
+        v = static_cast<DataType>(clampedValue);
+    };
+
+    std::for_each(recastedData.begin(), recastedData.end(), functor);
+}
+
+void RescaleArray(
+    onnx::TensorProto::DataType dataType,
+    double scale,
+    /*inout*/ span<std::byte> arrayByteData
+    )
+{
+    switch (dataType)
+    {
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   RescaleArray<bool    >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  RescaleArray<uint8_t >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: RescaleArray<uint16_t>(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: RescaleArray<uint32_t>(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   RescaleArray<int8_t  >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  RescaleArray<int16_t >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  RescaleArray<int32_t >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  RescaleArray<float   >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: RescaleArray<double  >(scale, /*inout*/ arrayByteData); break;
+    default:
+        assert(false); // Could not have reached here because we only set a known subset.
+    }
+}
+
+template<typename InputDataType, typename OutputDataType>
+std::pair<OutputDataType, OutputDataType> ArrayMinMax(
+    /*inout*/ span<std::byte> arrayByteData
+    )
+{
+    auto recastedData = reinterpret_span<InputDataType>(arrayByteData);
+    InputDataType lowestValue  = std::numeric_limits<InputDataType>::max();
+    InputDataType highestValue = std::numeric_limits<InputDataType>::lowest();
+    auto functor = [&](InputDataType v) mutable
+    {
+        if (v < lowestValue ) lowestValue  = v;
+        if (v > highestValue) highestValue = v;
+    };
+
+    std::for_each(recastedData.begin(), recastedData.end(), functor);
+
+    return std::pair<OutputDataType, OutputDataType>(
+        static_cast<OutputDataType>(lowestValue),
+        static_cast<OutputDataType>(highestValue)
+    );
+}
+
+std::pair<double, double> ArrayMinMax(
+    onnx::TensorProto::DataType dataType,
+    /*inout*/ span<std::byte> arrayByteData
+    )
+{
+    switch (dataType)
+    {
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   return ArrayMinMax<bool    , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  return ArrayMinMax<uint8_t , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: return ArrayMinMax<uint16_t, double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: return ArrayMinMax<uint32_t, double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   return ArrayMinMax<int8_t  , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  return ArrayMinMax<int16_t , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  return ArrayMinMax<int32_t , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  return ArrayMinMax<float   , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: return ArrayMinMax<double  , double>(arrayByteData);
+    default:
+        assert(false); // Could not have reached here because we only set a known subset.
+        return { 0.0, 1.0 };
     }
 }
 
@@ -2088,6 +2191,23 @@ void ConvertElementTypeToUInt8(
     }
 }
 
+// Downcasts a given element type to uint8 (e.g. for pixel imagery).
+template <typename T, size_t sourceElementByteStride = sizeof(T)>
+void ConvertElementTypeToUInt8Clamped(
+    _In_reads_bytes_(elementCount * sourceElementByteStride) uint8_t const* source,
+    _Out_writes_(elementCount) uint8_t* destination,
+    size_t elementCount
+    )
+{
+    // std::copy gives warnings about casting, but we explicitly do want the cast, even if there is bit loss.
+    for (; elementCount != 0; --elementCount)
+    {
+        T const* recastSource = reinterpret_cast<T const*>(source);
+        *destination++ = clamp_cast<uint8_t, T>(*recastSource);
+        source += sourceElementByteStride;
+    }
+}
+
 uint32_t GetElementCountFromByteSpan(onnx::TensorProto::DataType dataType, span<uint8_t const> source)
 {
     const uint32_t elementByteSize = GetByteSizeFromDataType(dataType);
@@ -2098,7 +2218,7 @@ uint32_t GetElementCountFromByteSpan(onnx::TensorProto::DataType dataType, span<
     return static_cast<uint32_t>(source.size_bytes() / elementByteSize);
 }
 
-void ConvertElementTypeToUInt8(
+void ConvertElementTypeToUInt8Clamped(
     onnx::TensorProto::DataType dataType,
     span<uint8_t const> source,
     span<uint8_t> destination
@@ -2112,19 +2232,19 @@ void ConvertElementTypeToUInt8(
 
     switch (dataType)
     {
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      ConvertElementTypeToUInt8<float>   (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     ConvertElementTypeToUInt8<double>  (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       ConvertElementTypeToUInt8<bool>    (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      ConvertElementTypeToUInt8<uint8_t> (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       ConvertElementTypeToUInt8<int8_t>  (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     ConvertElementTypeToUInt8<uint16_t>(source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      ConvertElementTypeToUInt8<int16_t> (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     ConvertElementTypeToUInt8<uint32_t>(source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      ConvertElementTypeToUInt8<int32_t> (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     ConvertElementTypeToUInt8<uint64_t>(source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      ConvertElementTypeToUInt8<int64_t> (source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  ConvertElementTypeToUInt8<float, sizeof(float)*2>(source.data(), destination.data(), sourceElementCount); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: ConvertElementTypeToUInt8<double, sizeof(double)*2>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      ConvertElementTypeToUInt8Clamped<float>   (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     ConvertElementTypeToUInt8Clamped<double>  (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       ConvertElementTypeToUInt8Clamped<bool>    (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:      ConvertElementTypeToUInt8Clamped<uint8_t> (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:       ConvertElementTypeToUInt8Clamped<int8_t>  (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:     ConvertElementTypeToUInt8Clamped<uint16_t>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:      ConvertElementTypeToUInt8Clamped<int16_t> (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:     ConvertElementTypeToUInt8Clamped<uint32_t>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:      ConvertElementTypeToUInt8Clamped<int32_t> (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:     ConvertElementTypeToUInt8Clamped<uint64_t>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      ConvertElementTypeToUInt8Clamped<int64_t> (source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  ConvertElementTypeToUInt8Clamped<float, sizeof(float)*2>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: ConvertElementTypeToUInt8Clamped<double, sizeof(double)*2>(source.data(), destination.data(), sourceElementCount); break;
     // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16
     default: throw std::ios::failure("Unsupported data type in tensor.");
     }
@@ -2243,7 +2363,7 @@ void StoreImageData(
     {
         const uint32_t sourceElementCount = GetElementCountFromByteSpan(dataType, pixelBytes);
         pixelBytesBuffer.resize(sourceElementCount);
-        ConvertElementTypeToUInt8(dataType, pixelBytes, /*out*/ pixelBytesBuffer);
+        ConvertElementTypeToUInt8Clamped(dataType, pixelBytes, /*out*/ pixelBytesBuffer);
         pixelBytes = pixelBytesBuffer;
         dataType = onnx::TensorProto::DataType::TensorProto_DataType_UINT8;
     }
@@ -2478,6 +2598,8 @@ void ConvertTensor(
     std::u8string_view pixelFormatString,     // matters for image files
     std::u8string_view channelLayoutString,   // matters for image files
     bool shouldPrintRawBytes,               // for printing CSV
+    bool shouldNormalizeValues,
+    double scale, // default = 1.0
     _In_z_ wchar_t const* outputFilename
     )
 {
@@ -2591,6 +2713,25 @@ void ConvertTensor(
     // Print details.
     PrintTensorInfo(ToUtf8Char(tensor.name()), L"", resolvedDimensions, dataType);
 
+    std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
+
+    // TODO: If the output data type has a wider range than the input data type,
+    // then upcast it first. Otherwise we might get an output array of all zeros.
+    // TODO: Add inputDataType and outputDataType.
+    // TODO: Error if PNG and outputDataType != uint8.
+    if (shouldNormalizeValues)
+    {
+        std::pair<double, double> range = ArrayMinMax(tensor.data_type(), arrayByteData);
+        double totalRange = (range.second - range.first);
+        scale *= (1.0 / totalRange);
+    }
+
+    if (scale != 1.0)
+    {
+        RescaleArray(tensor.data_type(), scale, /*inout*/ arrayByteData);
+        tensor.set_raw_data(arrayByteData.data(), arrayByteData.size());
+    }
+
     if (outputFileType == FileType::Text)
     {
         std::string modelString;
@@ -2608,12 +2749,10 @@ void ConvertTensor(
     }
     else if (outputFileType == FileType::RawData)
     {
-        std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
         WriteBinaryFile(outputFilename, arrayByteData);
     }
     else if (outputFileType == FileType::CommaSeparatedValue)
     {
-        std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
         std::u8string text;
         WriteCsv(arrayByteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
         WriteBinaryFile(outputFilename, text);
@@ -2621,13 +2760,11 @@ void ConvertTensor(
     else if (outputFileType == FileType::NumPyArray)
     {
         std::vector<std::byte> fileData;
-        std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
         WriteNpy(arrayByteData, tensor.data_type(), resolvedDimensions, /*out*/ fileData);
         WriteBinaryFile(outputFilename, fileData);
     }
     else if (outputFileType == FileType::Image)
     {
-        std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
         std::vector<std::byte> pixelBytes(arrayByteData.data(), arrayByteData.data() + arrayByteData.size());
         RearrangeChannels(
             dataType,
@@ -2658,7 +2795,7 @@ void ConvertTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "ConvertOnnxModel 2018-07-19..2021-04-25 FDwR\r\n"
+    std::cout << "ConvertOnnxModel 2018-07-19..2021-11-19 FDwR\r\n"
                  "\r\n"
                  "Converts:\r\n"
                  "    - binary ONNX model file to proto text and back.\r\n"
@@ -2710,6 +2847,9 @@ void PrintUsage()
                  "          -rawhex - display as raw hexadecimal when writing .csv\r\n"
                  "             -row - single row or range for .csv\r\n"
                  "          -column - single column or range for .csv\r\n"
+                 "           -scale - scale tensor values during conversion\r\n"
+                 "    -inversescale - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255)\r\n"
+                 " -normalizevalues - should normalize values in tensor 0 to 1\r\n"
                  //"   -channellayout - either nchw or nhwc (needed for images)\r\n" // Not functional enough to enable yet.
                  "\r\n"
                  "File types:\r\n"
@@ -2791,6 +2931,8 @@ int Main(int argc, wchar_t** argv)
     std::vector<int32_t> dimensions = {-1};
     onnx::TensorProto::DataType dataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
     HalfOpenRangeUint32 rowRange = {}, columnRange = {};
+    double scale = 1.0;
+    bool shouldNormalizeValues = false;
     bool shouldPrintRawBytes = false;
     bool shouldZeroModelValues = false;
 
@@ -2856,6 +2998,28 @@ int Main(int argc, wchar_t** argv)
             else if (argument == L"-zeromodelvalues")
             {
                 shouldZeroModelValues = true;
+            }
+            else if (argument == L"-scale")
+            {
+                if (++i >= argc)
+                {
+                    throw std::invalid_argument("Scale expects a value");
+                }
+                std::u8string s = ToUtf8String(argv[i]);
+                scale = atof(reinterpret_cast<char*>(s.data()));
+            }
+            else if (argument == L"-inversescale")
+            {
+                if (++i >= argc)
+                {
+                    throw std::invalid_argument("Inverse scale expects a value");
+                }
+                std::u8string s = ToUtf8String(argv[i]);
+                scale = 1.0f / atof(reinterpret_cast<char*>(s.data()));
+            }
+            else if (argument == L"-normalizevalues")
+            {
+                shouldNormalizeValues = true;
             }
             #if 0 // Not functional enough to enable yet. todo: Rename to "layout", and ensure image conversion works.
             else if (argument == L"-channellayout")
@@ -2940,6 +3104,8 @@ int Main(int argc, wchar_t** argv)
             pixelFormatString,
             channelLayoutString,
             shouldPrintRawBytes,
+            shouldNormalizeValues,
+            scale,
             outputFilename.c_str()
         );
     }
