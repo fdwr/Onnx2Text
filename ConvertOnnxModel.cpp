@@ -1,3 +1,7 @@
+// TODO: Update command line syntax to be more flexible, like ImageMagick
+// e.g. convertonnxmodel convert (dataType:float32 dimensions:[256,256,3,1] strides:ONNX dimensionSemantics:NCHW input:foo.dat) cast:float32 scale:255 normalize:true output:bar.dat
+//      convertonnxmodel convert dataType:float32 dimensions:[256,256,3,1] strides:ONNX foo.dat cast:float32 scale:255 normalize:true bar.dat
+
 #define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google protobuf using std::iterator as a base class in C++17.
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
 #define NOMINMAX
@@ -769,7 +773,7 @@ void ReadCsv(std::u8string_view text, /*out*/std::vector<int32_t>& values)
     const char8_t* end = text.data() + text.size();
 
     // Special case of empty dimensions.
-    if (text == u8"()")
+    if (text == u8"[]" || text == u8"()")
     {
         return;
     }
@@ -2840,7 +2844,7 @@ void PrintUsage()
                  "                    (only needed if can't tell from file extension, like with .pb).\r\n"
                  "      -dimensions - explicit tensor dimensions for .csv or .dat file which do not\r\n"
                  "                    store dimensions internally. Defaults to 1D otherwise.\r\n"
-                 "                    Pass \"()\" to indicate a 0D scalar.\r\n"
+                 "                    Pass \"[]\" to indicate a 0D scalar.\r\n"
                  "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
                  "                    uint16,int32,uint32,int64,uint64,bool8).\r\n"
                  " -zeromodelvalues - zero any tensor values (clears model initializer weights)\r\n"
