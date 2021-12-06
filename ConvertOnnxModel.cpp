@@ -1,6 +1,72 @@
 // TODO: Update command line syntax to be more flexible, like ImageMagick
 // e.g. convertonnxmodel convert (dataType:float32 dimensions:[256,256,3,1] strides:ONNX dimensionSemantics:NCHW input:foo.dat) cast:float32 scale:255 normalize:true output:bar.dat
 //      convertonnxmodel convert dataType:float32 dimensions:[256,256,3,1] strides:ONNX foo.dat cast:float32 scale:255 normalize:true bar.dat
+//
+// TODO: Print more detailed input and output information.
+//
+//  convertonnxmodel convert input.onnxtensor cast:float32 normalize:true scale:255 layout:WHC strides:increasing output.bin
+//
+//  input:{
+//      file:"input.onnxtensor"
+//      name:"MulWeights_42"
+//      datatype:uint8
+//      dimensions:[3,240,320]
+//      strides:[307200,320,1] // decreasing ONNX
+//      layout:CHW
+//  }
+//  operations:{
+//      cast:float32
+//      normalize:true
+//      scale:255
+//  }
+//  output:{
+//      file:"output.bin"
+//      datatype:float32
+//      dimensions:[320,240,3]
+//      strides:[1,3,640]
+//      layout:WHC
+//  }
+//
+//  convertonnxmodel convert input.onnxtensor output.png
+//
+//  input:{
+//      file:"input.onnxtensor"
+//      datatype:uint8
+//      dimensions:[3,240,320]
+//      strides:[307200,320,1] // decreasing
+//      layout:CHW
+//  }
+//  operations:{
+//      cast:uint8
+//  }
+//  output:{
+//      file:"output.png"
+//      datatype:uint8
+//      dimensions:[3,320,240]
+//      bytestrides:[1,3,640] // increasing
+//      layout:CWH
+//  }
+//
+//  convertonnxmodel convert input.csv size:3,320,240 output.png
+//
+//  input:{
+//      file:"input.csv"
+//      datatype:uint8
+//      dimensions:[230400]
+//      strides:[1] // increasing
+//      layout:_
+//  }
+//  operations:{
+//      cast:uint8 // implicit
+//      reshape:{size:[3,320,240] strides:increasing} // implicit
+//  }
+//  output:{
+//      file:"output.png"
+//      datatype:uint8
+//      dimensions:[3,320,240]
+//      strides:[1,3,640] // increasing
+//      layout:CWH
+//  }
 
 #define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google protobuf using std::iterator as a base class in C++17.
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
@@ -1175,6 +1241,7 @@ void SwapBytes(/*inout*/ span<uint8_t> arrayByteData, uint32_t elementByteSize)
 
 template<typename DataType>
 void RescaleArray(
+    double prebias,
     double scale,
     /*inout*/ span<std::byte> arrayByteData
     )
@@ -1184,7 +1251,7 @@ void RescaleArray(
     constexpr double highestValue = double(std::numeric_limits<DataType>::max());
     auto functor = [=](DataType& v)
     {
-        double clampedValue = std::clamp<double>(scale * v, lowestValue, highestValue);
+        double clampedValue = std::clamp<double>((v + prebias) * scale, lowestValue, highestValue);
         v = static_cast<DataType>(clampedValue);
     };
 
@@ -1193,21 +1260,22 @@ void RescaleArray(
 
 void RescaleArray(
     onnx::TensorProto::DataType dataType,
+    double prebias,
     double scale,
     /*inout*/ span<std::byte> arrayByteData
     )
 {
     switch (dataType)
     {
-    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   RescaleArray<bool    >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  RescaleArray<uint8_t >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: RescaleArray<uint16_t>(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: RescaleArray<uint32_t>(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   RescaleArray<int8_t  >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  RescaleArray<int16_t >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  RescaleArray<int32_t >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  RescaleArray<float   >(scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: RescaleArray<double  >(scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   RescaleArray<bool    >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  RescaleArray<uint8_t >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: RescaleArray<uint16_t>(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: RescaleArray<uint32_t>(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   RescaleArray<int8_t  >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  RescaleArray<int16_t >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  RescaleArray<int32_t >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  RescaleArray<float   >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: RescaleArray<double  >(prebias, scale, /*inout*/ arrayByteData); break;
     default:
         assert(false); // Could not have reached here because we only set a known subset.
     }
@@ -2717,22 +2785,33 @@ void ConvertTensor(
     // Print details.
     PrintTensorInfo(ToUtf8Char(tensor.name()), L"", resolvedDimensions, dataType);
 
-    std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(tensor);
+    std::vector<std::byte> arrayByteData;
+    auto getArrayByteData = [&]()
+    {
+        if (arrayByteData.empty())
+        {
+            arrayByteData = GetOnnxTensorRawByteData(tensor);
+        }
+    };
 
     // TODO: If the output data type has a wider range than the input data type,
     // then upcast it first. Otherwise we might get an output array of all zeros.
     // TODO: Add inputDataType and outputDataType.
     // TODO: Error if PNG and outputDataType != uint8.
+    double prebias = 0.0;
     if (shouldNormalizeValues)
     {
+        getArrayByteData();
         std::pair<double, double> range = ArrayMinMax(tensor.data_type(), arrayByteData);
         double totalRange = (range.second - range.first);
+        prebias = -range.first;
         scale *= (1.0 / totalRange);
     }
 
     if (scale != 1.0)
     {
-        RescaleArray(tensor.data_type(), scale, /*inout*/ arrayByteData);
+        getArrayByteData();
+        RescaleArray(tensor.data_type(), prebias, scale, /*inout*/ arrayByteData);
         tensor.set_raw_data(arrayByteData.data(), arrayByteData.size());
     }
 
@@ -2753,22 +2832,26 @@ void ConvertTensor(
     }
     else if (outputFileType == FileType::RawData)
     {
+        getArrayByteData();
         WriteBinaryFile(outputFilename, arrayByteData);
     }
     else if (outputFileType == FileType::CommaSeparatedValue)
     {
+        getArrayByteData();
         std::u8string text;
         WriteCsv(arrayByteData, onnx::TensorProto::DataType(tensor.data_type()), shouldPrintRawBytes, /*out*/ text);
         WriteBinaryFile(outputFilename, text);
     }
     else if (outputFileType == FileType::NumPyArray)
     {
+        getArrayByteData();
         std::vector<std::byte> fileData;
         WriteNpy(arrayByteData, tensor.data_type(), resolvedDimensions, /*out*/ fileData);
         WriteBinaryFile(outputFilename, fileData);
     }
     else if (outputFileType == FileType::Image)
     {
+        getArrayByteData();
         std::vector<std::byte> pixelBytes(arrayByteData.data(), arrayByteData.data() + arrayByteData.size());
         RearrangeChannels(
             dataType,
@@ -2915,7 +2998,7 @@ ConversionMode GetConversionModeFromFileType(FileType fileType)
     {
     case FileType::Unknown: return ConversionMode::Unknown;
     case FileType::OnnxModel: return ConversionMode::Graph;
-    case FileType::GoogleProtobuf: return ConversionMode::Unknown;
+    case FileType::GoogleProtobuf: return ConversionMode::Tensor; // Assume .pb is tensor for ONNX model zoo/backend usage, even though .pb is technically an agnostic container type.
     case FileType::Text: return ConversionMode::Unknown;
     case FileType::CommaSeparatedValue: return ConversionMode::Tensor;
     case FileType::Image: return ConversionMode::Tensor;
