@@ -3120,7 +3120,9 @@ int Main(int argc, wchar_t** argv)
             #endif
             else
             {
-                throw std::invalid_argument("Unknown argument.");
+                char buffer[256];
+                sprintf_s(buffer, std::size(buffer), "Unknown argument: %S", argument.data());
+                throw std::invalid_argument(std::string(buffer));
             }
         }
         else
