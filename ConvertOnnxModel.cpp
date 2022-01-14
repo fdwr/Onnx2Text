@@ -1942,7 +1942,12 @@ void PrintTensorInfo(
     if (!fileName.empty())
     {
         printf(
-            "Tensor \"%.*S\", datatype: %s, dimensions: %s (%d bytes)\n",
+            "Tensor:\n"
+            "  Name: \"%.*ls\"\n"
+            "  Data type: %hs\n"
+            "  Dimensions: %hs\n"
+            "  Byte size: %d bytes\n"
+            ,
             uint32_t(fileName.size()),
             fileName.data(),
             ToChar(GetStringNameFromDataType(dataType).data()),
@@ -1953,7 +1958,12 @@ void PrintTensorInfo(
     else
     {
         printf(
-            "Tensor \"%.*s\", datatype: %s, dimensions: %s, (%d bytes)\n",
+            "Tensor:\n"
+            "  name: \"%.*hs\"\n"
+            "  datatype: %hs\n"
+            "  dimensions: %hs\n"
+            "  byte size: %d bytes\n"
+            ,
             uint32_t(name.size()),
             ToChar(name.data()),
             ToChar(GetStringNameFromDataType(dataType).data()),
@@ -1990,16 +2000,38 @@ void ZeroModelTensorWeights(onnx::ModelProto& model)
     }
 }
 
-void ConvertModel(
+void DisplayModelInformation(onnx::ModelProto const& model)
+{
+    onnx::GraphProto const& graphProto = model.graph();
+    printf(
+        "Graph:\n"
+        "  total nodes: %d\n"
+        ,
+        graphProto.node_size()
+    );
+
+    std::map<std::string, uint32_t> operatorTypeCounts;
+    for (const onnx::NodeProto& node : graphProto.node())
+    {
+        auto operatorType = node.op_type();
+        operatorTypeCounts[operatorType]++;
+    }
+
+    // Print the counts of each type of operator (e.g. "Conv" x 12).
+    printf("Nodes:\n");
+    for (auto& operatorTypeCount : operatorTypeCounts)
+    {
+        printf("  \"%s\",%d\n", operatorTypeCount.first.c_str(), operatorTypeCount.second);
+    }
+}
+
+void LoadModel(
     _In_z_ wchar_t const* inputFilename,
-    _In_z_ wchar_t const* outputFilename,
-    bool shouldZeroModelValues
+    bool shouldZeroModelValues,
+    /*inout*/ onnx::ModelProto& model
     )
 {
     FileType inputFileType  = GetFileType(std::wstring_view(inputFilename));
-    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
-
-    onnx::ModelProto model;
 
     // Read the input file.
 
@@ -2035,9 +2067,18 @@ void ConvertModel(
     {
         ZeroModelTensorWeights(/*inout*/ model);
     }
+}
 
+void StoreModel(
+    _In_z_ wchar_t const* outputFilename,
+    onnx::ModelProto const& model
+    )
+{
     // Write the output file (either another model or directory of tensors).
 
+    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
+
+    bool succeeded = false;
     if (outputFileType == FileType::Text)
     {
         // Write the whole model to a text file.
@@ -2661,22 +2702,20 @@ void MakeTensor(
     onnxTensor.set_raw_data(byteData.data(), byteData.size());
 }
 
-void ConvertTensor(
+void LoadTensor(
     _In_z_ wchar_t const* inputFilename,
     span<int32_t const> dimensions,
     onnx::TensorProto::DataType dataType,
     HalfOpenRangeUint32 rowRange,           // matters for CSV files
     HalfOpenRangeUint32 columnRange,        // matters for CSV files
-    std::u8string_view pixelFormatString,     // matters for image files
-    std::u8string_view channelLayoutString,   // matters for image files
-    bool shouldPrintRawBytes,               // for printing CSV
+    std::u8string_view pixelFormatString,   // matters for image files
+    std::u8string_view channelLayoutString, // matters for image files
     bool shouldNormalizeValues,
     double scale, // default = 1.0
-    _In_z_ wchar_t const* outputFilename
-    )
+    /*inout*/ onnx::TensorProto& tensor
+)
 {
-    FileType inputFileType  = GetFileType(std::wstring_view(inputFilename));
-    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
+    FileType inputFileType = GetFileType(std::wstring_view(inputFilename));
 
     // Set defaults.
     if (dataType == onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED)
@@ -2689,7 +2728,6 @@ void ConvertTensor(
         channelLayoutString = u8"nchw";
     }
 
-    onnx::TensorProto tensor;
     std::vector<int32_t> resolvedDimensions(dimensions.begin(), dimensions.end());
 
     if (AreDimensionsSpecified(dimensions))
@@ -2771,15 +2809,57 @@ void ConvertTensor(
         throw std::ios::failure("Could not parse input tensor file.");
     }
 
-    // Read the data type and dimensions back from the tensor.
-    dataType = onnx::TensorProto::DataType(tensor.data_type());
-    if (!AreDimensionsSpecified(dimensions))
+    std::vector<std::byte> adjustedTensorByteData;
+    auto getArrayByteData = [&]()
     {
-        resolvedDimensions.clear();
-        for (auto v : tensor.dims())
+        if (adjustedTensorByteData.empty())
         {
-            resolvedDimensions.push_back(static_cast<int32_t>(v));
+            adjustedTensorByteData = GetOnnxTensorRawByteData(tensor);
         }
+    };
+
+    // TODO: Move this between load and store functions.
+    // TODO: If the output data type has a wider range than the input data type,
+    // then upcast it first. Otherwise we might get an output array of all zeros.
+    // TODO: Add inputDataType and outputDataType.
+    // TODO: Error if PNG and outputDataType != uint8.
+    double prebias = 0.0;
+    if (shouldNormalizeValues)
+    {
+        getArrayByteData();
+        std::pair<double, double> range = ArrayMinMax(tensor.data_type(), adjustedTensorByteData);
+        double totalRange = (range.second - range.first);
+        prebias = -range.first;
+        scale *= (1.0 / totalRange);
+    }
+
+    if (scale != 1.0)
+    {
+        getArrayByteData();
+        RescaleArray(tensor.data_type(), prebias, scale, /*inout*/ adjustedTensorByteData);
+    }
+
+    if (!adjustedTensorByteData.empty())
+    {
+        tensor.set_raw_data(adjustedTensorByteData.data(), adjustedTensorByteData.size());
+    }
+}
+
+void StoreTensor(
+    std::u8string_view channelLayoutString, // matters for image files
+    bool shouldPrintRawBytes,               // for printing CSV
+    _In_z_ wchar_t const* outputFilename,
+    /*inout*/ onnx::TensorProto const& tensor
+    )
+{
+    FileType outputFileType = GetFileType(std::wstring_view(outputFilename));
+
+    // Read the data type and dimensions back from the tensor.
+    onnx::TensorProto::DataType dataType = onnx::TensorProto::DataType(tensor.data_type());
+    std::vector<int32_t> resolvedDimensions;
+    for (auto v : tensor.dims())
+    {
+        resolvedDimensions.push_back(static_cast<int32_t>(v));
     }
 
     // Print details.
@@ -2794,27 +2874,12 @@ void ConvertTensor(
         }
     };
 
-    // TODO: If the output data type has a wider range than the input data type,
-    // then upcast it first. Otherwise we might get an output array of all zeros.
-    // TODO: Add inputDataType and outputDataType.
-    // TODO: Error if PNG and outputDataType != uint8.
-    double prebias = 0.0;
-    if (shouldNormalizeValues)
+    if (channelLayoutString.empty())
     {
-        getArrayByteData();
-        std::pair<double, double> range = ArrayMinMax(tensor.data_type(), arrayByteData);
-        double totalRange = (range.second - range.first);
-        prebias = -range.first;
-        scale *= (1.0 / totalRange);
+        channelLayoutString = u8"nchw";
     }
 
-    if (scale != 1.0)
-    {
-        getArrayByteData();
-        RescaleArray(tensor.data_type(), prebias, scale, /*inout*/ arrayByteData);
-        tensor.set_raw_data(arrayByteData.data(), arrayByteData.size());
-    }
-
+    bool succeeded = true;
     if (outputFileType == FileType::Text)
     {
         std::string modelString;
@@ -2894,28 +2959,24 @@ void PrintUsage()
                  "\r\n"
                  "    ConvertOnnxModel.exe -options inputfile outputfile\r\n"
                  "\r\n"
-                 "    Model from ONNX binary protobuf format to prototxt format\r\n"
+                 "    Convert model to/from ONNX binary protobuf and prototxt format\r\n"
                  "        ConvertOnnxModel input.onnx output.prototxt\r\n"
-                 "    Model in prototxt text format to binary protobuf ONNX format\r\n"
                  "        ConvertOnnxModel input.prototxt output.onnx\r\n"
-                 "    Model from ONNX binary protobuf back to binary with zeroed tensor values\r\n"
+                 "\r\n"
+                 "    Zero weights in ONNX binary protobuf\r\n"
                  "        ConvertOnnxModel -zeromodelvalues input.onnx output.onnx\r\n"
                  "\r\n"
-                 "    Model from ONNX binary protobuf format to directory of NumPy tensors\r\n"
+                 "    Export model from ONNX protobuf to NumPy tensors/data files\r\n"
                  "        ConvertOnnxModel resnet50.onnx x:\\resnet_*.npy\r\n"
-                 "    Model from ONNX binary protobuf format to directory of raw data files\r\n"
                  "        ConvertOnnxModel squeezenet.onnx z:\\folder\\*_weight.dat\r\n"
                  "\r\n"
-                 "    Tensor from ONNX binary protobuf to comma separated values\r\n"
+                 "    Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG\r\n"
                  "        ConvertOnnxModel input.onnxtensor output.csv\r\n"
-                 "    Tensor from ONNX binary protobuf (.pb) to image file\r\n"
-                 "        ConvertOnnxModel -tensor input.pb output.png\r\n"
-                 "    Tensor data as comma separated values to raw binary file\r\n"
+                 "        ConvertOnnxModel input.pb output.png\r\n"
                  "        ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat\r\n"
-                 "    Tensor from NumPy array format to protobuf ONNX binary format\r\n"
                  "        ConvertOnnxModel input.npy output.onnxtensor\r\n"
                  "\r\n"
-                 "    Tensor from generated randomness to ONNX binary protobuf format\r\n"
+                 "    Generate tensor from randomness\r\n"
                  "        ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
                  "\r\n"
                  "Parameters:\r\n"
@@ -2937,6 +2998,7 @@ void PrintUsage()
                  "           -scale - scale tensor values during conversion\r\n"
                  "    -inversescale - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255)\r\n"
                  " -normalizevalues - should normalize values in tensor 0 to 1\r\n"
+                 "     -information - display more verbose file information (output file is not needed)\r\n"
                  //"   -channellayout - either nchw or nhwc (needed for images)\r\n" // Not functional enough to enable yet.
                  "\r\n"
                  "File types:\r\n"
@@ -3022,6 +3084,7 @@ int Main(int argc, wchar_t** argv)
     bool shouldNormalizeValues = false;
     bool shouldPrintRawBytes = false;
     bool shouldZeroModelValues = false;
+    bool displayMoreInformation = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -3108,6 +3171,10 @@ int Main(int argc, wchar_t** argv)
             {
                 shouldNormalizeValues = true;
             }
+            else if (argument == L"-information")
+            {
+                displayMoreInformation = true;
+            }
             #if 0 // Not functional enough to enable yet. todo: Rename to "layout", and ensure image conversion works.
             else if (argument == L"-channellayout")
             {
@@ -3150,7 +3217,7 @@ int Main(int argc, wchar_t** argv)
     }
 
     // Print to console if no output file is given.
-    if (outputFilename.empty())
+    if (outputFilename.empty() && !displayMoreInformation)
     {
         outputFilename = L"con.txt";
     }
@@ -3167,15 +3234,18 @@ int Main(int argc, wchar_t** argv)
         }
     }
 
-    printf(
-        "Input filename:  %S\r\n"
-        "Output filename: %S\r\n"
-        "Conversion mode: %s\r\n"
-        "\r\n",
-        inputFilename.c_str(),
-        outputFilename.c_str(),
-        ToChar(g_conversionModeNames[uint32_t(conversionMode)])
-    );
+    printf("Input filename:  %ls\r\n", inputFilename.c_str());
+    if (!outputFilename.empty())
+    {
+        printf(
+            "Output filename: %ls\r\n"
+            "Conversion mode: %hs\r\n"
+            ,
+            outputFilename.c_str(),
+            ToChar(g_conversionModeNames[uint32_t(conversionMode)])
+        );
+    }
+    printf("\r\n");
 
     if (conversionMode == ConversionMode::Tensor)
     {
@@ -3184,7 +3254,8 @@ int Main(int argc, wchar_t** argv)
             throw std::invalid_argument("\"-zeromodelvalues\" passed but input was not a model.");
         }
 
-        ConvertTensor(
+        onnx::TensorProto tensor;
+        LoadTensor(
             inputFilename.c_str(),
             dimensions,
             dataType,
@@ -3192,11 +3263,19 @@ int Main(int argc, wchar_t** argv)
             columnRange,
             pixelFormatString,
             channelLayoutString,
-            shouldPrintRawBytes,
             shouldNormalizeValues,
             scale,
-            outputFilename.c_str()
+            /*inout*/ tensor
         );
+        if (!outputFilename.empty())
+        {
+            StoreTensor(
+                channelLayoutString,
+                shouldPrintRawBytes,
+                outputFilename.c_str(),
+                tensor
+            );
+        }
     }
     else if (conversionMode == ConversionMode::Graph)
     {
@@ -3209,7 +3288,16 @@ int Main(int argc, wchar_t** argv)
             throw std::invalid_argument("\"-datatype\" may only be specified for \"-tensor\" conversion.");
         }
 
-        ConvertModel(inputFilename.c_str(), outputFilename.c_str(), shouldZeroModelValues);
+        onnx::ModelProto model;
+        LoadModel(inputFilename.c_str(), shouldZeroModelValues, /*inout*/ model);
+        if (displayMoreInformation)
+        {
+            DisplayModelInformation(model);
+        }
+        if (!outputFilename.empty())
+        {
+            StoreModel(outputFilename.c_str(), model);
+        }
     }
     else // conversionMode == ConversionMode::Unknown
     {

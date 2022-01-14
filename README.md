@@ -12,45 +12,39 @@ Dwayne Robinson (FDwR)
 
 # Example usage
 
-- Model to model
-    - Model from ONNX binary protobuf format to prototxt format  
-        `ConvertOnnxModel input.onnx output.prototxt`
-    - Model in prototxt text format to binary protobuf ONNX format  
-        `ConvertOnnxModel input.prototxt output.onnx`
-    - Model from ONNX binary protobuf back to binary with zeroed tensor values  
-        `ConvertOnnxModel -zeromodelvalues input.onnx output.onnx`
+- Convert model to/from ONNX binary protobuf and prototxt format
+    - `ConvertOnnxModel input.onnx output.prototxt`
+    - `ConvertOnnxModel input.prototxt output.onnx`
 
-- Model to multiple tensors
-    - Model from ONNX binary protobuf format to directory of NumPy tensors  
-        `ConvertOnnxModel resnet50.onnx x:\resnet_*.npy`
-    - Model from ONNX binary protobuf format to directory of raw data files  
-        `ConvertOnnxModel squeezenet.onnx z:\folder\*_weight.dat`
+- Zero weights in ONNX binary protobuf
+    - `ConvertOnnxModel -zeromodelvalues input.onnx output.onnx`
 
-- Tensor to tensor
-    - Tensor from ONNX binary protobuf to comma separated values  
-        `ConvertOnnxModel input.onnxtensor output.csv`
-    - Tensor from ONNX binary protobuf (.pb) to image file  
-        `ConvertOnnxModel -tensor input.pb output.png`
-    - Tensor data as comma separated values to raw binary file  
-        `ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
-    - Tensor from NumPy array format to protobuf ONNX binary format  
-        `ConvertOnnxModel input.npy output.onnxtensor`
+- Export model from ONNX protobuf to NumPy tensors/data files
+    - `ConvertOnnxModel resnet50.onnx x:\\resnet_*.npy`
+    - `ConvertOnnxModel squeezenet.onnx z:\\folder\\*_weight.dat`
 
-- Tensor from generated randomness to ONNX binary protobuf format  
-    `ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
+- Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG
+    - `ConvertOnnxModel input.onnxtensor output.csv`
+    - `ConvertOnnxModel input.pb output.png`
+    - `ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
+    - `ConvertOnnxModel input.npy output.onnxtensor`
+
+- Generate tensor from randomness
+    - `ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
 
 # Parameters
 * input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
-* -tensor - specifies the input file is a tensor (only needed if ambiguous file type like .pb).
-* -graph - specifies the input file is a model (only needed if ambiguous file type like .pb).
-* -dimensions - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "()" to indicate 0D scalar.
-* -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
-* -zeromodelvalues - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
-* -row - single row or range for .csv.
-* -column - single column or range for .csv.
-* -scale - scale tensor values during conversion.
-* -inversescale - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255).
-* -normalizevalues - should normalize values in tensor 0 to 1.
+* `-tensor` - specifies the input file is a tensor (only needed if ambiguous file type like .pb).
+* `-graph` - specifies the input file is a model (only needed if ambiguous file type like .pb).
+* `-dimensions` - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "()" to indicate 0D scalar.
+* `-datatype` - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
+* `-zeromodelvalues` - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
+* `-row` - single row or range for .csv.
+* `-column` - single column or range for .csv.
+* `-scale` - scale tensor values during conversion.
+* `-inversescale` - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255).
+* `-normalizevalues` - should normalize values in tensor 0 to 1.
+* `-information` - display more verbose file information (output file is not needed)\r\n"
 
 # File Types
 * Model file types:
