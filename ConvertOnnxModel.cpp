@@ -3171,9 +3171,14 @@ int Main(int argc, wchar_t** argv)
             {
                 shouldNormalizeValues = true;
             }
-            else if (argument == L"-information")
+            else if (argument == L"-information" || argument == L"-info")
             {
                 displayMoreInformation = true;
+            }
+            else if (argument == L"-help")
+            {
+                PrintUsage();
+                return EXIT_SUCCESS;
             }
             #if 0 // Not functional enough to enable yet. todo: Rename to "layout", and ensure image conversion works.
             else if (argument == L"-channellayout")
@@ -3267,6 +3272,7 @@ int Main(int argc, wchar_t** argv)
             scale,
             /*inout*/ tensor
         );
+
         if (!outputFilename.empty())
         {
             StoreTensor(
@@ -3275,6 +3281,16 @@ int Main(int argc, wchar_t** argv)
                 outputFilename.c_str(),
                 tensor
             );
+        }
+        else // At least display information.
+        {
+            onnx::TensorProto::DataType resolvedDataType = onnx::TensorProto::DataType(tensor.data_type());
+            std::vector<int32_t> resolvedDimensions;
+            for (auto v : tensor.dims())
+            {
+                resolvedDimensions.push_back(static_cast<int32_t>(v));
+            }
+            PrintTensorInfo(ToUtf8Char(tensor.name()), L"", resolvedDimensions, resolvedDataType);
         }
     }
     else if (conversionMode == ConversionMode::Graph)
