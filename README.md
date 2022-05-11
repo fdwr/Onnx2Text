@@ -7,6 +7,10 @@ Dwayne Robinson (FDwR)
 - Generates output tensor values (ones, zeros, iota series, random).
 - Exports model tensors to directory of tensor files.
 
+# Motivation
+
+I needed to make small edits to existing models for debugging, and I didn't want to have to write actual code every time, just a command line tool. `<rant>`Additionally I needed a simple tool that predictably _just worked_ by itself (not a tool that depends on your current environment and needed pip install this or pip install that, but oops, not that incompatible version of the library, and don't forget to install Cmake and protobuf and add them to your path before the egg/wheel thingie is built 🤦‍♀️, blah, blah... The ML ecosystem is a *mess*).`</rant>`
+
 # Usage
     ConvertOnnxModel.exe [options] inputFilename [outputFilename]
 
