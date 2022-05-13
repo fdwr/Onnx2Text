@@ -1,73 +1,3 @@
-// TODO: Update command line syntax to be more flexible, like ImageMagick
-// e.g. convertonnxmodel convert (dataType:float32 dimensions:[256,256,3,1] strides:ONNX dimensionSemantics:NCHW input:foo.dat) cast:float32 scale:255 normalize:true output:bar.dat
-//      convertonnxmodel convert dataType:float32 dimensions:[256,256,3,1] strides:ONNX foo.dat cast:float32 scale:255 normalize:true bar.dat
-//
-// TODO: Print more detailed input and output information.
-//
-//  convertonnxmodel convert input.onnxtensor cast:float32 normalize:true scale:255 layout:WHC strides:increasing output.bin
-//
-//  input:{
-//      file:"input.onnxtensor"
-//      name:"MulWeights_42"
-//      datatype:uint8
-//      dimensions:[3,240,320]
-//      strides:[307200,320,1] // decreasing ONNX
-//      layout:CHW
-//  }
-//  operations:{
-//      cast:float32
-//      normalize:true
-//      scale:255
-//  }
-//  output:{
-//      file:"output.bin"
-//      datatype:float32
-//      dimensions:[320,240,3]
-//      strides:[1,3,640]
-//      layout:WHC
-//  }
-//
-//  convertonnxmodel convert input.onnxtensor output.png
-//
-//  input:{
-//      file:"input.onnxtensor"
-//      datatype:uint8
-//      dimensions:[3,240,320]
-//      strides:[307200,320,1] // decreasing
-//      layout:CHW
-//  }
-//  operations:{
-//      cast:uint8
-//  }
-//  output:{
-//      file:"output.png"
-//      datatype:uint8
-//      dimensions:[3,320,240]
-//      bytestrides:[1,3,640] // increasing
-//      layout:CWH
-//  }
-//
-//  convertonnxmodel convert input.csv size:3,320,240 output.png
-//
-//  input:{
-//      file:"input.csv"
-//      datatype:uint8
-//      dimensions:[230400]
-//      strides:[1] // increasing
-//      layout:_
-//  }
-//  operations:{
-//      cast:uint8 // implicit
-//      reshape:{size:[3,320,240] strides:increasing} // implicit
-//  }
-//  output:{
-//      file:"output.png"
-//      datatype:uint8
-//      dimensions:[3,320,240]
-//      strides:[1,3,640] // increasing
-//      layout:CWH
-//  }
-
 #define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google protobuf using std::iterator as a base class in C++17.
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
 #define NOMINMAX
@@ -523,13 +453,14 @@ struct Mapping
 };
 const static Mapping fileTypeMappings[] =
 {
-    {L"pb", FileType::GoogleProtobuf},
+    { L"pb", FileType::GoogleProtobuf },
     { L"onnx", FileType::OnnxModel },
     { L"txt" , FileType::Text },
     { L"prototxt" , FileType::Text },
     { L"csv" , FileType::CommaSeparatedValue },
     { L"dat" , FileType::RawData },
     { L"bin" , FileType::RawData },
+    { L"bmp" , FileType::Image },
     { L"png" , FileType::Image },
     { L"jpg" , FileType::Image },
     { L"jpeg", FileType::Image },
@@ -2198,6 +2129,7 @@ struct PixelFormatAttributes
 constexpr PixelFormatAttributes g_pixelFormatAttributes[] =
 {
     {u8"gray8", GUID_WICPixelFormat8bppGray, 1, 1, onnx::TensorProto::DataType::TensorProto_DataType_UINT8},
+    {u8"pal8", GUID_WICPixelFormat8bppIndexed, 1, 1, onnx::TensorProto::DataType::TensorProto_DataType_UINT8},
     {u8"b8g8r8", GUID_WICPixelFormat24bppBGR, 3, 1, onnx::TensorProto::DataType::TensorProto_DataType_UINT8},
     {u8"r8g8b8", GUID_WICPixelFormat24bppRGB, 3, 1, onnx::TensorProto::DataType::TensorProto_DataType_UINT8},
     {u8"b8g8r8a8", GUID_WICPixelFormat32bppBGRA, 4, 1, onnx::TensorProto::DataType::TensorProto_DataType_UINT8},

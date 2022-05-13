@@ -1,0 +1,71 @@
+TODO:
+
+Update command line syntax to be more flexible, like ImageMagick
+ e.g. convertonnxmodel convert (dataType:float32 dimensions:[256,256,3,1] strides:ONNX dimensionSemantics:NCHW input:foo.dat) cast:float32 scale:255 normalize:true output:bar.dat
+      convertonnxmodel convert dataType:float32 dimensions:[256,256,3,1] strides:ONNX foo.dat cast:float32 scale:255 normalize:true bar.dat
+
+TODO: Print more detailed input and output information.
+
+convertonnxmodel convert input.onnxtensor cast:float32 normalize:true scale:255 layout:WHC strides:increasing output.bin
+
+input:{
+    file:"input.onnxtensor"
+    name:"MulWeights_42"
+    datatype:uint8
+    dimensions:[3,240,320]
+    strides:[307200,320,1] // decreasing ONNX
+    layout:CHW
+}
+operations:{
+    cast:float32
+    normalize:true
+    scale:255
+}
+output:{
+    file:"output.bin"
+    datatype:float32
+    dimensions:[320,240,3]
+    strides:[1,3,640]
+    layout:WHC
+}
+
+convertonnxmodel convert input.onnxtensor output.png
+
+input:{
+    file:"input.onnxtensor"
+    datatype:uint8
+    dimensions:[3,240,320]
+    strides:[307200,320,1] // decreasing
+    layout:CHW
+}
+operations:{
+    cast:uint8
+}
+output:{
+    file:"output.png"
+    datatype:uint8
+    dimensions:[3,320,240]
+    bytestrides:[1,3,640] // increasing
+    layout:CWH
+}
+
+convertonnxmodel convert input.csv size:3,320,240 output.png
+
+input:{
+    file:"input.csv"
+    datatype:uint8
+    dimensions:[230400]
+    strides:[1] // increasing
+    layout:_
+}
+operations:{
+    cast:uint8 // implicit
+    reshape:{size:[3,320,240] strides:increasing} // implicit
+}
+output:{
+    file:"output.png"
+    datatype:uint8
+    dimensions:[3,320,240]
+    strides:[1,3,640] // increasing
+    layout:CWH
+}
