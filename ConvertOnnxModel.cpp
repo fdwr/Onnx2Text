@@ -2052,7 +2052,8 @@ void StoreModel(
         for (const onnx::TensorProto& onnxTensor : graphProto.initializer())
         {
             // Read data type, dimensions, and name.
-            onnx::TensorProto::DataType dataType = onnxTensor.data_type();
+            // Someone changed the data type enum in protobuf to a raw int32, which forced manual casting :/.
+            onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type());
 
             std::vector<int32_t> dimensions;
             for (auto v : onnxTensor.dims())
@@ -2086,7 +2087,7 @@ void StoreModel(
                 {
                     std::u8string text;
                     std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
-                    WriteCsv(arrayByteData, onnxTensor.data_type(), /*shouldPrintRawBytes*/false, /*out*/ text);
+                    WriteCsv(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), /*shouldPrintRawBytes*/false, /*out*/ text);
                     WriteBinaryFile(currentFileName.c_str(), text);
                 }
                 break;
@@ -2095,7 +2096,7 @@ void StoreModel(
                 {
                     std::vector<std::byte> fileData;
                     std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
-                    WriteNpy(arrayByteData, onnxTensor.data_type(), dimensions, /*out*/ fileData);
+                    WriteNpy(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), dimensions, /*out*/ fileData);
                     WriteBinaryFile(currentFileName.c_str(), fileData);
                 }
                 break;
@@ -2759,7 +2760,7 @@ void LoadTensor(
     if (shouldNormalizeValues)
     {
         getArrayByteData();
-        std::pair<double, double> range = ArrayMinMax(tensor.data_type(), adjustedTensorByteData);
+        std::pair<double, double> range = ArrayMinMax(static_cast<onnx::TensorProto::DataType>(tensor.data_type()), adjustedTensorByteData);
         double totalRange = (range.second - range.first);
         prebias = -range.first;
         scale *= (1.0 / totalRange);
@@ -2768,7 +2769,7 @@ void LoadTensor(
     if (scale != 1.0)
     {
         getArrayByteData();
-        RescaleArray(tensor.data_type(), prebias, scale, /*inout*/ adjustedTensorByteData);
+        RescaleArray(static_cast<onnx::TensorProto::DataType>(tensor.data_type()), prebias, scale, /*inout*/ adjustedTensorByteData);
     }
 
     if (!adjustedTensorByteData.empty())
@@ -2843,7 +2844,7 @@ void StoreTensor(
     {
         getArrayByteData();
         std::vector<std::byte> fileData;
-        WriteNpy(arrayByteData, tensor.data_type(), resolvedDimensions, /*out*/ fileData);
+        WriteNpy(arrayByteData, static_cast<onnx::TensorProto::DataType>(tensor.data_type()), resolvedDimensions, /*out*/ fileData);
         WriteBinaryFile(outputFilename, fileData);
     }
     else if (outputFileType == FileType::Image)

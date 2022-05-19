@@ -94,6 +94,10 @@ Build libprotobuf.vcxproj project. Find the .lib files under protobuf-3.5.1\cmak
 
 Copy the newest version of `onnx.proto` from https://github.com/onnx/onnx/blob/master/onnx/onnx.proto.
 
+Replace "LITE_RUNTIME" with "option optimize_for = CODE_SIZE;
+
 Run the ProtoBuf compiler.
 
     protobuf3.5.1\bin\protoc.exe onnx.proto --cpp_out=. --error_format=msvs
+
+    (local copy here: protobuf-3.5.1/cmake/build/solution/MinSizeRel/protoc.exe)

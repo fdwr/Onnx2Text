@@ -274,7 +274,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>WindowsCodecs.lib;$(ProjectDir)protobuf-3.5.1\cmake\build\solution\x64\Release\libprotobuf.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsCodecs.lib;$(ProjectDir)protobuf-3.5.1\cmake\build\solution\MinSizeRel\libprotobuf.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <GenerateMapFile>true</GenerateMapFile>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
@@ -338,7 +338,11 @@
     <Natvis Include="span.natvis" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="onnx.proto" />
     <None Include="README.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="LICENSE.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
