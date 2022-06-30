@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.31702.278
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ConvertOnnxModel", "ConvertOnnxModel.vcxproj", "{C6A45EA5-9793-4F71-ADAA-5A6CE4456D84}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Onnx2Text", "Onnx2Text.vcxproj", "{C6A45EA5-9793-4F71-ADAA-5A6CE4456D84}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

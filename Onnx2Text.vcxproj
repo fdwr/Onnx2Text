@@ -41,7 +41,7 @@
     <ProjectGuid>{C6A45EA5-9793-4F71-ADAA-5A6CE4456D84}</ProjectGuid>
     <RootNamespace>OpModels</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>ConvertOnnxModel</ProjectName>
+    <ProjectName>Onnx2Text</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -328,7 +328,7 @@
   </ItemDefinitionGroup>
 -->
   <ItemGroup>
-    <ClCompile Include="ConvertOnnxModel.cpp" />
+    <ClCompile Include="Onnx2Text.cpp" />
     <ClCompile Include="onnx.pb.cc" />
   </ItemGroup>
   <ItemGroup>
