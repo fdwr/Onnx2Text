@@ -1,4 +1,4 @@
-ConvertOnnxModel  
+Onnx2Text  
 2018-07-19..2021-11-19  
 Dwayne Robinson (FDwR)  
 
@@ -12,29 +12,29 @@ Dwayne Robinson (FDwR)
 I needed to make small edits to existing models for debugging, and I didn't want to have to write actual code every time, just a command line tool. `<rant>`Additionally I needed a simple tool that predictably _just worked_ by itself (not a tool that depends on your current environment and needed pip install this or pip install that, but oops, not that incompatible version of the library, and don't forget to install Cmake and protobuf and add them to your path before the egg/wheel thingie is built 🤦‍♀️, blah, blah... The ML ecosystem is a *mess*).`</rant>`
 
 # Usage
-    ConvertOnnxModel.exe [options] inputFilename [outputFilename]
+    Onnx2Text.exe [options] inputFilename [outputFilename]
 
 # Example usage
 
 - Convert model to/from ONNX binary protobuf and prototxt format
-    - `ConvertOnnxModel input.onnx output.prototxt`
-    - `ConvertOnnxModel input.prototxt output.onnx`
+    - `Onnx2Text input.onnx output.prototxt`
+    - `Onnx2Text input.prototxt output.onnx`
 
 - Zero weights in ONNX binary protobuf
-    - `ConvertOnnxModel -zeromodelvalues input.onnx output.onnx`
+    - `Onnx2Text -zeromodelvalues input.onnx output.onnx`
 
 - Export model from ONNX protobuf to NumPy tensors/data files
-    - `ConvertOnnxModel resnet50.onnx x:\\resnet_*.npy`
-    - `ConvertOnnxModel squeezenet.onnx z:\\folder\\*_weight.dat`
+    - `Onnx2Text resnet50.onnx x:\\resnet_*.npy`
+    - `Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat`
 
 - Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG
-    - `ConvertOnnxModel input.onnxtensor output.csv`
-    - `ConvertOnnxModel input.pb output.png`
-    - `ConvertOnnxModel -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
-    - `ConvertOnnxModel input.npy output.onnxtensor`
+    - `Onnx2Text input.onnxtensor output.csv`
+    - `Onnx2Text input.pb output.png`
+    - `Onnx2Text -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
+    - `Onnx2Text input.npy output.onnxtensor`
 
 - Generate tensor from randomness
-    - `ConvertOnnxModel -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
+    - `Onnx2Text -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
 
 # Parameters
 * input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
@@ -71,7 +71,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
         * generate(random,1,100) - random values between min/max [31,56,2,69...]
 
 # Building
-Load Visual Studio solution (ConvertOnnxModel.sln), and build.
+Load Visual Studio solution (Onnx2Text.sln), and build.
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
