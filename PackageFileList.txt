@@ -1,3 +1,3 @@
-./build/x64_Release/ConvertOnnxModel.exe
+./build/x64_Release/Onnx2Text.exe
 README.md
 LICENSE.txt
