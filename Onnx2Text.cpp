@@ -1671,7 +1671,7 @@ private:
 struct NumPyArrayHeaderV1
 {
     uint8_t signature[6]; // "\x0093NUMPY"
-    uint8_t majorVersion;
+    uint8_t majorVersion; // == 1
     uint8_t minorVersion;
     uint16_t dictionaryLength; // Confusingly instead labeled "HEADER_LEN" in the documentation.
 };
@@ -1679,10 +1679,20 @@ struct NumPyArrayHeaderV1
 struct NumPyArrayHeaderV2
 {
     uint8_t signature[6]; // "\x0093NUMPY"
-    uint8_t majorVersion;
+    uint8_t majorVersion; // == 2
     uint8_t minorVersion;
     uint32_t dictionaryLength; // Confusingly instead labeled "HEADER_LEN" in the documentation.
 };
+
+// V3 is identical to V2 except that the strings are UTF-8. For Onnx2Text, it's irrelevant
+// anyway, since the encoding applies to fields we don't care about. For all the core fields
+// that matter (like "shape" and "fortran_order"), they only use the lower basic ASCII.
+using NumPyArrayHeaderV3 = NumPyArrayHeaderV2;
+
+// Version 4 is unsupported. When/if NumPy specifies it some year, the tool might work
+// correctly as-is assuming no breaking changes, but it feels safer to reject it than to
+// silently parse the file incorrectly. Also, NumPy will likely continue to emit V2 by
+// default as a minimum compatibility bar.
 
 void ReadNpy(
     span<std::byte const> fileData,
@@ -1704,9 +1714,9 @@ void ReadNpy(
 
     auto& headerV1 = read_as<NumPyArrayHeaderV1>(fileData);
     auto& headerV2 = read_as<NumPyArrayHeaderV2>(fileData);
-    if (headerV1.majorVersion >= 3)
+    if (headerV1.majorVersion >= 4)
     {
-        throw std::ios::failure("Versions > 4 unsupported.");
+        throw std::ios::failure("Versions >= 4 unsupported.");
     }
 
     size_t dictionaryOffset = (headerV1.majorVersion >= 2) ? sizeof(NumPyArrayHeaderV2) : sizeof(NumPyArrayHeaderV1);
