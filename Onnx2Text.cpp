@@ -45,7 +45,7 @@ inline unsigned char* ToUChar(std::byte* p) { return reinterpret_cast<unsigned c
 inline char8_t* ToUtf8Char(char* p) { return reinterpret_cast<char8_t*>(p); }
 inline std::u8string_view ToUtf8Char(std::string_view s) { return std::u8string_view(reinterpret_cast<char8_t const*>(s.data()), s.size()); }
 
-std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>,wchar_t> g_converterToUtf8;
+std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> g_converterToUtf8;
 
 inline std::u8string ToUtf8String(std::wstring_view source)
 {
@@ -437,6 +437,7 @@ enum class FileType
     NumPyArray,          // .npy (not .npz zip files with multiple arrays in them)
     OnnxTensor,          // .onnxtensor
     TensorGenerator,     // generator:
+    GraphVizDot,         // .dot
 };
 
 size_t GetFileExtensionOffset(std::wstring_view filename)
@@ -467,6 +468,7 @@ const static Mapping fileTypeMappings[] =
     { L"npy" , FileType::NumPyArray },
     { L"onnxtensor", FileType::OnnxTensor },
     { L"tensorproto", FileType::OnnxTensor },
+    { L"dot", FileType::GraphVizDot },
 };
 
 FileType GetFileType(std::wstring_view filename)
@@ -1956,6 +1958,219 @@ void DisplayModelInformation(onnx::ModelProto const& model)
     }
 }
 
+std::string GetSanitizedGraphVizIdentifier(std::string_view name)
+{
+    // This isn't complete because other characters could be found inside ONNX files,
+    // but it handles the most problematic ones at least.
+    std::string newName(name);
+    for (char& c : newName)
+    {
+        switch (c)
+        {
+        case '\\':
+        case '/':
+        case '\"':
+        case '|':
+        case '<':
+        case '>':
+        case ':':
+        case '?':
+        case '*':
+        case ' ':
+            c = '_';
+            break;
+        }
+    }
+    return newName;
+}
+
+std::string GetSanitizedGraphVizLabel(std::string_view name)
+{
+    std::string newName(name);
+    for (char& c : newName)
+    {
+        switch (c)
+        {
+        case '\'':
+        case '\"':
+            c = '_';
+            break;
+        }
+    }
+    return newName;
+}
+
+void ConvertOnnxToGraphViz(
+    onnx::ModelProto const& model,
+    bool showConstantTensors,
+    std::ofstream& outputFile
+    )
+{
+    const onnx::GraphProto& onnxGraph = model.graph();
+
+    char const* header =
+R"(digraph Graph {
+// Settings
+layout=dot
+rankdir=TB;
+edge [headport="n", tailport="s", arrowsize=0.5 ];
+graph [pencolor=transparent, fontname="Segoe UI", fontsize=10, color=black]
+splines=polyline;
+nodesep=0.025;
+ranksep=0.25;
+center=true;
+outputorder=edgesfirst;
+)";
+    char const* footer = "}\n";
+    char const* inputsOutputsComment = "\n// Graph input/output tensors\n";
+    char const* constantTensorsComment = "\n// Constant tensors\n";
+    char const* edgesComment = "\n// Edges\n";
+    char const* operatorsComment = "\n// Operators\n";
+    char const* operatorNodeStyle =     R"(node [style="filled, rounded", color=black, fillcolor="#E0E0F0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=1, margin="0.02, 0.02" ];)" "\n";
+    char const* inputOutputNodeStyle =  R"(node [style=filled, color=black, fillcolor="#C0F0C0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
+    char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
+    char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
+
+    auto nodes = onnxGraph.node();
+    std::vector<std::string> sanitizedNodeNames;
+    sanitizedNodeNames.reserve(nodes.size());
+    std::set<std::string, std::less<>> constantTensors;
+    std::vector<std::string_view> constantTensorsInOrder;
+
+    outputFile << header;
+
+    // Gather the list of constant tensors defined with static weights inside the graph.
+    for (const onnx::TensorProto& tensorProto : onnxGraph.initializer())
+    {
+        const std::string& name = tensorProto.name();
+        constantTensors.insert(name);
+    }
+
+    // Write input/output tensors.
+    outputFile << inputsOutputsComment;
+    outputFile << inputOutputNodeStyle;
+
+    // Exclude any constant tensors. Newer models do not have this issue, as they only declare
+    // true inputs, but some old models defined all constant tensors as graph inputs too, which
+    // confuses later logic when trying to bind tensors to inputs (e.g. opset 9 squeezenet).
+    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.input())
+    {
+        const std::string& name = valueInfo.name();
+        if (!constantTensors.contains(name))
+        {
+            outputFile << GetSanitizedGraphVizIdentifier(name);
+            outputFile << '\n';
+        }
+    }
+
+    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.output())
+    {
+        outputFile << GetSanitizedGraphVizIdentifier(valueInfo.name());
+        outputFile << '\n';
+    }
+
+    if (showConstantTensors)
+    {
+        // Write constant tensors.
+        outputFile << constantTensorsComment;
+        outputFile << constantNodeStyle;
+
+        // Enumerate them in node binding order rather than the arbitrary order they are listed in the model
+        // or in alphabetic order, since node binding order is more intuitive when looking at the graph
+        // since the inputs follow the ONNX order.
+        constantTensorsInOrder.reserve(constantTensors.size());
+        for (const onnx::NodeProto& node : nodes)
+        {
+            for (const std::string& tensorName : node.input())
+            {
+                if (constantTensors.contains(tensorName))
+                {
+                    constantTensorsInOrder.push_back(tensorName);
+                }
+            }
+            for (const std::string& tensorName : node.output())
+            {
+                if (constantTensors.contains(tensorName))
+                {
+                    constantTensorsInOrder.push_back(tensorName);
+                }
+            }
+        }
+
+        for (auto& name : constantTensorsInOrder)
+        {
+            outputFile << GetSanitizedGraphVizIdentifier(name);
+            outputFile << '\n';
+        }
+    }
+
+    // Write operator nodes.
+    outputFile << operatorsComment;
+    outputFile << operatorNodeStyle;
+
+    // Enumerate all nodes, generating sanitized names (avoid illegal characters in GraphViz identifier names).
+    for (int nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex)
+    {
+        const onnx::NodeProto& node = nodes[nodeIndex];
+        const std::string& nodeName = node.name();
+        const std::string& operatorTypeName = node.op_type();
+
+        std::string sanitizedNodeName;
+        if (nodeName.empty())
+        {
+            // Just use current node index for unique name.
+            sanitizedNodeName = std::to_string(nodeIndex);
+        }
+        else
+        {
+            sanitizedNodeName = GetSanitizedGraphVizIdentifier(nodeName);
+        }
+
+        outputFile << sanitizedNodeName << " [label=\"" << GetSanitizedGraphVizLabel(operatorTypeName) << "\"]\n";
+        sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
+    }
+
+    // Write all edges.
+    outputFile << edgesComment;
+    outputFile << intermediateNodeStyle;
+
+    auto writeEdge = [&](std::string_view sanitizedNodeName, std::string_view tensorName, bool isInput) -> void
+    {
+        if (!showConstantTensors && constantTensors.contains(tensorName))
+        {
+            return; // Don't show constant tensors, which can be noisy.
+        }
+        auto sanitizedTensorName = GetSanitizedGraphVizIdentifier(tensorName);
+
+        // Change the edge direction depending on whether input or output edge.
+        std::string_view first = sanitizedNodeName;
+        std::string_view second = sanitizedTensorName;
+        if (isInput)
+        {
+            std::swap(first, second);
+        }
+        
+        outputFile << first << " -> " << second << "\n";
+    };
+
+    for (int nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex)
+    {
+        const onnx::NodeProto& node = nodes[nodeIndex];
+        std::string_view sanitizedNodeName = sanitizedNodeNames[nodeIndex];
+
+        for (const std::string& tensorName : node.input())
+        {
+            writeEdge(sanitizedNodeName, tensorName, true);
+        }
+        for (const std::string& tensorName : node.output())
+        {
+            writeEdge(sanitizedNodeName, tensorName, false);
+        }
+    }
+
+    outputFile << footer;
+}
+
 void LoadModel(
     _In_z_ wchar_t const* inputFilename,
     bool shouldZeroModelValues,
@@ -1983,6 +2198,10 @@ void LoadModel(
     {
         std::ifstream ifs(inputFilename, std::ios::binary);
         succeeded = model.ParseFromIstream(&ifs);
+    }
+    else if (inputFileType != FileType::Unknown)
+    {
+        throw std::invalid_argument("File type is not supported for input.");
     }
     else
     {
@@ -2106,6 +2325,17 @@ void StoreModel(
                 // Switch statement could not have been entered due to `if` above.
             }
         }
+    }
+    else if (outputFileType == FileType::GraphVizDot)
+    {
+        std::ofstream outputFile(outputFilename, std::ios::out);
+        ConvertOnnxToGraphViz(model, /*showConstantTensors*/ false, outputFile);
+        succeeded = true;
+
+    }
+    else if (outputFileType != FileType::Unknown)
+    {
+        throw std::invalid_argument("File type is not supported for output.");
     }
     else
     {
@@ -2892,24 +3122,28 @@ void PrintUsage()
                  "\r\n"
                  "    Onnx2Text.exe -options inputfile outputfile\r\n"
                  "\r\n"
-                 "    Convert model to/from ONNX binary protobuf and prototxt format\r\n"
+                 "    Convert model to/from ONNX binary protobuf and prototxt format:\r\n"
                  "        Onnx2Text input.onnx output.prototxt\r\n"
                  "        Onnx2Text input.prototxt output.onnx\r\n"
                  "\r\n"
-                 "    Zero weights in ONNX binary protobuf\r\n"
+                 "    Write GraphViz dot file (download GraphViz separately):\r\n"
+                 "        Onnx2Text input.onnx output.dot\r\n"
+                 "        dot.exe output.dot -Tpng -O   (or -Tsvg)\r\n"
+                 "\r\n"
+                 "    Zero weights in ONNX binary protobuf:\r\n"
                  "        Onnx2Text -zeromodelvalues input.onnx output.onnx\r\n"
                  "\r\n"
-                 "    Export model from ONNX protobuf to NumPy tensors/data files\r\n"
+                 "    Export model from ONNX protobuf to NumPy tensors/data files:\r\n"
                  "        Onnx2Text resnet50.onnx x:\\resnet_*.npy\r\n"
                  "        Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat\r\n"
                  "\r\n"
-                 "    Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG\r\n"
+                 "    Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG:\r\n"
                  "        Onnx2Text input.onnxtensor output.csv\r\n"
                  "        Onnx2Text input.pb output.png\r\n"
                  "        Onnx2Text -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat\r\n"
                  "        Onnx2Text input.npy output.onnxtensor\r\n"
                  "\r\n"
-                 "    Generate tensor from randomness\r\n"
+                 "    Generate tensor from randomness:\r\n"
                  "        Onnx2Text -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
                  "\r\n"
                  "Parameters:\r\n"

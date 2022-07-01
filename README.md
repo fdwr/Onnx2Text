@@ -3,6 +3,7 @@ Onnx2Text
 Dwayne Robinson (FDwR)  
 
 - Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
+- Converts an ONNX model to GraphViz dot file.
 - Converts an ONNX tensor protobuf to text/CSV/PNG/NPY and vice versa.
 - Generates output tensor values (ones, zeros, iota series, random).
 - Exports model tensors to directory of tensor files.
@@ -16,24 +17,31 @@ I needed to make small edits to existing models for debugging, and I didn't want
 
 # Example usage
 
-- Convert model to/from ONNX binary protobuf and prototxt format
+- Convert model to/from ONNX binary protobuf and prototxt format:
     - `Onnx2Text input.onnx output.prototxt`
     - `Onnx2Text input.prototxt output.onnx`
 
-- Zero weights in ONNX binary protobuf
+- Just show information like how many of each operator is used:
+    - `Onnx2Text -information model.onnx`
+
+- Write GraphViz dot file (download GraphViz separately):
+    - `Onnx2Text input.onnx output.dot`
+    - `dot.exe output.dot -Tpng -O`  (or -Tsvg)
+
+- Zero weights in ONNX binary protobuf:
     - `Onnx2Text -zeromodelvalues input.onnx output.onnx`
 
-- Export model from ONNX protobuf to NumPy tensors/data files
+- Export model from ONNX protobuf to NumPy tensors/data files:
     - `Onnx2Text resnet50.onnx x:\\resnet_*.npy`
     - `Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat`
 
-- Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG
+- Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG:
     - `Onnx2Text input.onnxtensor output.csv`
     - `Onnx2Text input.pb output.png`
     - `Onnx2Text -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat`
     - `Onnx2Text input.npy output.onnxtensor`
 
-- Generate tensor from randomness
+- Generate tensor from randomness:
     - `Onnx2Text -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor`
 
 # Parameters
