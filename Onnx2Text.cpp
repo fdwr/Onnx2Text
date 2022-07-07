@@ -2160,7 +2160,8 @@ outputorder=edgesfirst;
             std::swap(first, second);
         }
         
-        outputFile << first << " -> " << second << "\n";
+        // Print the edge. If input edge to operator, then avoid the arrowhead.
+        outputFile << first << " -> " << second << (isInput ? " [arrowhead=normal]" : " [arrowhead=none]") << "\n";
     };
 
     for (int nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex)
@@ -2170,11 +2171,11 @@ outputorder=edgesfirst;
 
         for (const std::string& tensorName : node.input())
         {
-            writeEdge(sanitizedNodeName, tensorName, true);
+            writeEdge(sanitizedNodeName, tensorName, /*isInput*/ true);
         }
         for (const std::string& tensorName : node.output())
         {
-            writeEdge(sanitizedNodeName, tensorName, false);
+            writeEdge(sanitizedNodeName, tensorName, /*isInput*/ false);
         }
     }
 
