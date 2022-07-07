@@ -1968,45 +1968,51 @@ void DisplayModelInformation(onnx::ModelProto const& model)
     }
 }
 
+// Get the identifier back, quoted and escaped if needed.
 std::string GetSanitizedGraphVizIdentifier(std::string_view name)
 {
-    // This isn't complete because other characters could be found inside ONNX files,
-    // but it handles the most problematic ones at least.
-    std::string newName(name);
-    for (char& c : newName)
+    std::string newName;
+
+    auto isLeadingIdentifierCharacter = [](char c) {return (c >= 'A' && c >= 'Z') || (c >= 'a' && c >= 'z') || c == '_'; };
+    auto isIdentifierCharacter = [](char c) {return (c >= 'A' && c >= 'Z') || (c >= 'a' && c >= 'z') || (c >= '0' && c <= '9') || c == '_'; };
+    // Technically GraphViz also supports numbers as valid identifiers too (e.g. -12.34),
+    // and HTML strings (e.g. <Hello <b>there</b> world>, and I could add more logic for
+    // that, but those don't matter here because model node names are not numbers or HTML.
+
+    bool isValidIdentifier = !name.empty() && isLeadingIdentifierCharacter(name.front());
+
+    for (char c : name)
+    {
+        if (!isIdentifierCharacter(c))
+        {
+            isValidIdentifier = false;
+            break;
+        }
+    }
+
+    if (isValidIdentifier)
+    {
+        newName = name;
+        return newName; // Return the string as-is.
+    }
+
+    // Quote the string, checking for \ and ".
+    // Note new lines are allowed and don't need to be checked.
+    newName.reserve(name.size() + 2);
+    newName.push_back('\"');
+    for (char c : name)
     {
         switch (c)
         {
         case '\\':
-        case '/':
         case '\"':
-        case '|':
-        case '<':
-        case '>':
-        case ':':
-        case '?':
-        case '*':
-        case ' ':
-            c = '_';
+            newName.push_back('\\');
             break;
         }
+        newName.push_back(c);
     }
-    return newName;
-}
+    newName.push_back('\"');
 
-std::string GetSanitizedGraphVizLabel(std::string_view name)
-{
-    std::string newName(name);
-    for (char& c : newName)
-    {
-        switch (c)
-        {
-        case '\'':
-        case '\"':
-            c = '_';
-            break;
-        }
-    }
     return newName;
 }
 
@@ -2136,7 +2142,7 @@ outputorder=edgesfirst;
             sanitizedNodeName = GetSanitizedGraphVizIdentifier(nodeName);
         }
 
-        outputFile << sanitizedNodeName << " [label=\"" << GetSanitizedGraphVizLabel(operatorTypeName) << "\"]\n";
+        outputFile << sanitizedNodeName << " [label=" << GetSanitizedGraphVizIdentifier(operatorTypeName) << "]\n";
         sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
     }
 
@@ -3139,7 +3145,7 @@ void PrintUsage()
                  "\r\n"
                  "    Write GraphViz dot file (download GraphViz separately):\r\n"
                  "        Onnx2Text input.onnx output.dot\r\n"
-                 "        dot.exe output.dot -Tpng -O   (or -Tsvg)\r\n"
+                 "        dot.exe output.dot -Tsvg -O   (or -Tpng)\r\n"
                  "\r\n"
                  "    Zero weights in ONNX binary protobuf:\r\n"
                  "        Onnx2Text -zeromodelvalues input.onnx output.onnx\r\n"
