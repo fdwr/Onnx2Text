@@ -2031,7 +2031,7 @@ layout=dot
 rankdir=TB;
 edge [headport="n", tailport="s", arrowsize=0.5 ];
 graph [pencolor=transparent, fontname="Segoe UI", fontsize=10, color=black]
-splines=polyline;
+splines=spline;
 nodesep=0.025;
 ranksep=0.25;
 center=true;
