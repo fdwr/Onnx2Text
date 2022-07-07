@@ -98,7 +98,7 @@ void ThrowBadHResultRuntimeErrorWithMessage(HRESULT hr)
 }
 
 #ifndef THROW_IF_FAILED
-#define THROW_IF_FAILED(hr) {if (FAILED(hr)) ThrowBadHResultRuntimeErrorWithMessage(hr);}
+#define THROW_IF_FAILED(hr) {HRESULT localHr = (hr); if (FAILED(localHr)) ThrowBadHResultRuntimeErrorWithMessage(localHr);}
 #endif
 
 template <typename T>
