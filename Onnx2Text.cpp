@@ -3127,7 +3127,7 @@ void StoreTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "Onnx2Text 2018-07-19..2022-06-29 FDwR\r\n"
+    std::cout << "Onnx2Text 2018-07-19..2022-07-07 FDwR\r\n"
                  "\r\n"
                  "Converts:\r\n"
                  "    - binary ONNX model file to proto text and back.\r\n"
