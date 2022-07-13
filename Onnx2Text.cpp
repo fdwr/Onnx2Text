@@ -2227,7 +2227,7 @@ void LoadModel(
 
     if (!succeeded)
     {
-        throw std::ios::failure("Could not parse input graph file.");
+        throw std::ios::failure("Could not load input graph file.");
     }
 
     if (shouldZeroModelValues)
@@ -3252,6 +3252,7 @@ ConversionMode GetConversionModeFromFileType(FileType fileType)
     case FileType::OnnxTensor: return ConversionMode::Tensor;
     case FileType::NumPyArray: return ConversionMode::Tensor;
     case FileType::TensorGenerator: return ConversionMode::Tensor;
+    case FileType::GraphVizDot: return ConversionMode::Graph;
     }
     return ConversionMode::Unknown;
 }
