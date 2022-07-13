@@ -2284,6 +2284,9 @@ void StoreModel(
             }
         }
 
+        succeeded = true;
+        uint32_t tensorCount = 0;
+
         onnx::GraphProto const& graphProto = model.graph();
         for (const onnx::TensorProto& onnxTensor : graphProto.initializer())
         {
@@ -2308,7 +2311,7 @@ void StoreModel(
             case FileType::OnnxTensor:
                 {
                     std::ofstream os(currentFileName, std::ios::binary);
-                    succeeded = onnxTensor.SerializeToOstream(&os);
+                    succeeded &= onnxTensor.SerializeToOstream(&os);
                 }
                 break;
 
@@ -2341,7 +2344,10 @@ void StoreModel(
                 assert(false);
                 // Switch statement could not have been entered due to `if` above.
             }
+
+            ++tensorCount;
         }
+        printf("%d tensors written\n", tensorCount);
     }
     else if (outputFileType == FileType::GraphVizDot)
     {
