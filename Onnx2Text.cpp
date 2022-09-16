@@ -292,7 +292,7 @@ bool starts_with(ContainerType1&& fullSequence, ContainerType2&& prefix)
         && std::equal(fullSequence.begin(), fullSequence.begin() + prefix.size(), prefix.begin(), prefix.end());
 }
 
-// e.g. starts_with(some_string_view, "prefix");
+// e.g. ends_with(some_string_view, "suffix");
 template <typename ContainerType1, typename ContainerType2>
 bool ends_with(ContainerType1&& fullSequence, ContainerType2&& suffix)
 {
@@ -987,7 +987,7 @@ std::u8string_view GetStringNameFromDataType(onnx::TensorProto::DataType dataTyp
 uint32_t GetByteSizeFromDataType(onnx::TensorProto::DataType dataType) noexcept
 {
     size_t index = static_cast<size_t>(dataType);
-    return g_elementDataTypeByteSizes[index < std::size(g_elementDataTypeNames) ? index : 0];
+    return g_elementDataTypeByteSizes[index < std::size(g_elementDataTypeByteSizes) ? index : 0];
 }
 
 uint32_t GetByteSizeFromDimensions(span<int32_t const> dimensions, onnx::TensorProto::DataType dataType) noexcept
@@ -1276,6 +1276,7 @@ void MapNumPyArrayDataTypeToOnnx(
     static_assert(false, "Double check that endianness is specified correctly for this architecture when using '='.");
     #endif
 
+    // Parse the string (e.g. f, i, i4, f8) into a default data type and (if given) byte size.
     // https://docs.python.org/2/library/array.html#module-array
     // https://numpy.org/devdocs/reference/arrays.dtypes.html
     for (char c : numPyElementType)
@@ -1308,6 +1309,8 @@ void MapNumPyArrayDataTypeToOnnx(
         }
     }
 
+    // The second pass resolves data types if a specific size was given, such as "f8" for float64.
+    // Otherwise the default type remains (e.g. "f" for float32).
     if (elementByteSize > 0)
     {
         switch (resolvedDataType)
@@ -1371,6 +1374,7 @@ void AppendOnnxDataTypeToNumPyArray(
     std::u8string_view characterCode;
     switch (dataType)
     {
+    //                                                              Explicit sized type    Short alias
     case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:    characterCode = u8"?"  /*'?'*/; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_INT8:    characterCode = u8"i1" /*'b'*/; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:   characterCode = u8"u1" /*'B'*/; break;
