@@ -54,7 +54,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 * `-scale` - scale tensor values during conversion.
 * `-inversescale` - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255).
 * `-normalizevalues` - should normalize values in tensor 0 to 1.
-* `-information` - display more verbose file information (output file is not needed)\r\n"
+* `-information` - display more verbose file information (output file is not needed).
 * `-tensor` - specifies the input file is a tensor (only needed if ambiguous file type like .pb).
 * `-graph` - specifies the input file is a model (only needed if ambiguous file type like .pb).
 
