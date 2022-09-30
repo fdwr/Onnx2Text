@@ -18,7 +18,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Example usage
 
 - Convert model to/from ONNX binary protobuf and prototxt format:
-    - `Onnx2Text input.onnx output.prototxt`
+    - `Onnx2Text input.onnx output.prototxt`  <i>plain `.txt` works too</i>
     - `Onnx2Text input.prototxt output.onnx`
 
 - Just show information like how many of each operator is used:
@@ -46,8 +46,6 @@ I needed to make small edits to existing models for debugging, and I didn't want
 
 # Parameters
 * input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
-* `-tensor` - specifies the input file is a tensor (only needed if ambiguous file type like .pb).
-* `-graph` - specifies the input file is a model (only needed if ambiguous file type like .pb).
 * `-dimensions` - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "()" to indicate 0D scalar.
 * `-datatype` - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
 * `-zeromodelvalues` - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
@@ -57,6 +55,8 @@ I needed to make small edits to existing models for debugging, and I didn't want
 * `-inversescale` - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255).
 * `-normalizevalues` - should normalize values in tensor 0 to 1.
 * `-information` - display more verbose file information (output file is not needed)\r\n"
+* `-tensor` - specifies the input file is a tensor (only needed if ambiguous file type like .pb).
+* `-graph` - specifies the input file is a model (only needed if ambiguous file type like .pb).
 
 # File Types
 * Model file types:
@@ -81,7 +81,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Building
 Load Visual Studio solution (Onnx2Text.sln), and build.
 
-The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it *could* compile for Linux too if you `#ifdef`'d those parts. Though, I don't use Linux frequently enough to support that.
+The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it *could* likely compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Though, I don't use Linux frequently enough to support that.
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
