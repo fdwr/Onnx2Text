@@ -484,6 +484,12 @@ FileType GetFileType(std::wstring_view filename)
         }
     }
 
+    // Special case for device name on Windows.
+    if (filename == L"con" || filename == L"con:")
+    {
+        return FileType::Text;
+    }
+
     return FileType::Unknown;
 }
 
@@ -1957,6 +1963,7 @@ void DisplayModelInformation(onnx::ModelProto const& model)
         graphProto.node_size()
     );
 
+    // Collect all unique operator names.
     std::map<std::string, uint32_t> operatorTypeCounts;
     for (const onnx::NodeProto& node : graphProto.node())
     {
@@ -1968,7 +1975,7 @@ void DisplayModelInformation(onnx::ModelProto const& model)
     printf("Nodes:\n");
     for (auto& operatorTypeCount : operatorTypeCounts)
     {
-        printf("  \"%s\",%d\n", operatorTypeCount.first.c_str(), operatorTypeCount.second);
+        printf("  %s x %d\n", operatorTypeCount.first.c_str(), operatorTypeCount.second);
     }
 }
 
@@ -3137,7 +3144,7 @@ void StoreTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "Onnx2Text 2018-07-19..2022-07-07 FDwR\r\n"
+    std::cout << "Onnx2Text 2018-07-19..2022-10-21 FDwR\r\n"
                  "\r\n"
                  "Converts:\r\n"
                  "    - binary ONNX model file to proto text and back.\r\n"
@@ -3419,7 +3426,9 @@ int Main(int argc, wchar_t** argv)
     // Print to console if no output file is given.
     if (outputFilename.empty() && !displayMoreInformation)
     {
-        outputFilename = L"con.txt";
+        std::cerr << "No output file names given.\r\n";
+        PrintUsage();
+        return EXIT_FAILURE;
     }
 
     // Deduce conversion mode from filename extension.
