@@ -3144,83 +3144,83 @@ void StoreTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "Onnx2Text 2018-07-19..2022-10-21 FDwR\r\n"
-                 "\r\n"
-                 "Converts:\r\n"
-                 "    - binary ONNX model file to proto text and back.\r\n"
-                 "    - tensors to/from prototext/ONNX/CSV/PNG/NPY and vice versa.\r\n"
-                 "    - generated values to output tensor (ones, zeros, iota series, random).\r\n"
-                 "    - model to directory of tensor files.\r\n"
-                 "\r\n"
-                 "Example usage:\r\n"
-                 "\r\n"
-                 "    Onnx2Text.exe -options inputfile outputfile\r\n"
-                 "\r\n"
-                 "    Convert model to/from ONNX binary protobuf and prototxt format:\r\n"
-                 "        Onnx2Text input.onnx output.prototxt\r\n"
-                 "        Onnx2Text input.prototxt output.onnx\r\n"
-                 "\r\n"
-                 "    Write GraphViz dot file (download GraphViz separately):\r\n"
-                 "        Onnx2Text input.onnx output.dot\r\n"
-                 "        dot.exe output.dot -Tsvg -O   (or -Tpng)\r\n"
-                 "\r\n"
-                 "    Zero weights in ONNX binary protobuf:\r\n"
-                 "        Onnx2Text -zeromodelvalues input.onnx output.onnx\r\n"
-                 "\r\n"
-                 "    Export model from ONNX protobuf to NumPy tensors/data files:\r\n"
-                 "        Onnx2Text resnet50.onnx x:\\resnet_*.npy\r\n"
-                 "        Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat\r\n"
-                 "\r\n"
-                 "    Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG:\r\n"
-                 "        Onnx2Text input.onnxtensor output.csv\r\n"
-                 "        Onnx2Text input.pb output.png\r\n"
-                 "        Onnx2Text -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat\r\n"
-                 "        Onnx2Text input.npy output.onnxtensor\r\n"
-                 "\r\n"
-                 "    Generate tensor from randomness:\r\n"
-                 "        Onnx2Text -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\r\n"
-                 "\r\n"
-                 "Parameters:\r\n"
-                 "        inputfile - either a graph or tensor (see file types below)\r\n"
-                 "       outputfile - either a graph or tensor (see file types below)\r\n"
-                 "          -tensor - specifies the input file is a tensor\r\n"
-                 "                    (only needed if can't tell from file extension, like with .pb).\r\n"
-                 "           -graph - specifies the input file is a graph model\r\n"
-                 "                    (only needed if can't tell from file extension, like with .pb).\r\n"
-                 "      -dimensions - explicit tensor dimensions for .csv or .dat file which do not\r\n"
-                 "                    store dimensions internally. Defaults to 1D otherwise.\r\n"
-                 "                    Pass \"[]\" to indicate a 0D scalar.\r\n"
-                 "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\r\n"
-                 "                    uint16,int32,uint32,int64,uint64,bool8).\r\n"
-                 " -zeromodelvalues - zero any tensor values (clears model initializer weights)\r\n"
-                 "          -rawhex - display as raw hexadecimal when writing .csv\r\n"
-                 "             -row - single row or range for .csv\r\n"
-                 "          -column - single column or range for .csv\r\n"
-                 "           -scale - scale tensor values during conversion\r\n"
-                 "    -inversescale - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255)\r\n"
-                 " -normalizevalues - should normalize values in tensor 0 to 1\r\n"
-                 "     -information - display more verbose file information (output file is not needed)\r\n"
-                 //"   -channellayout - either nchw or nhwc (needed for images)\r\n" // Not functional enough to enable yet.
-                 "\r\n"
-                 "File types:\r\n"
-                 "    Model file types:\r\n"
-                 "        .onnx - Open Neural Exchange model protobuf\r\n"
-                 "        .pb - Google Protobuf (with -graph)\r\n"
-                 "        .txt/.prototxt - Protobuf text\r\n"
-                 "    Tensor file types:\r\n"
-                 "        .onnxtensor - Open Neural Exchange tensor\r\n"
-                 "        .pb - Google Protobuf (with -tensor)\r\n"
-                 "        .csv - Comma Separate Value\r\n"
-                 "        .png - Image (Portable Network Graphics)\r\n"
-                 "        .jpg - Image (Joint Photographic Experts Group)\r\n"
-                 "        .npy - NumPyArray single tensor\r\n"
-                 "        .dat/.bin - Raw binary array (no header)\r\n"
-                 "        generators - pseudo input filename:\r\n"
-                 "            generate(ones) - all ones [1,1,1,1...]\r\n"
-                 "            generate(zeros) - all zeros [0,0,0,0...]\r\n"
-                 "            generate(values,3) - specific value [3,3,3,3...]\r\n"
-                 "            generate(iota,1,2) - increasing sequence [1,3,5...]\r\n"
-                 "            generate(random,1,100) - random values between min/max [31,56,2,69...]\r\n"
+    std::cout << "Onnx2Text 2018-07-19..2022-10-21 FDwR\n"
+                 "\n"
+                 "Converts:\n"
+                 "    - binary ONNX model file to proto text and back.\n"
+                 "    - tensors to/from prototext/ONNX/CSV/PNG/NPY and vice versa.\n"
+                 "    - generated values to output tensor (ones, zeros, iota series, random).\n"
+                 "    - model to directory of tensor files.\n"
+                 "\n"
+                 "Example usage:\n"
+                 "\n"
+                 "    Onnx2Text.exe -options inputfile outputfile\n"
+                 "\n"
+                 "    Convert model to/from ONNX binary protobuf and prototxt format:\n"
+                 "        Onnx2Text input.onnx output.prototxt\n"
+                 "        Onnx2Text input.prototxt output.onnx\n"
+                 "\n"
+                 "    Write GraphViz dot file (download GraphViz separately):\n"
+                 "        Onnx2Text input.onnx output.dot\n"
+                 "        dot.exe output.dot -Tsvg -O   (or -Tpng)\n"
+                 "\n"
+                 "    Zero weights in ONNX binary protobuf:\n"
+                 "        Onnx2Text -zeromodelvalues input.onnx output.onnx\n"
+                 "\n"
+                 "    Export model from ONNX protobuf to NumPy tensors/data files:\n"
+                 "        Onnx2Text resnet50.onnx x:\\resnet_*.npy\n"
+                 "        Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat\n"
+                 "\n"
+                 "    Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG:\n"
+                 "        Onnx2Text input.onnxtensor output.csv\n"
+                 "        Onnx2Text input.pb output.png\n"
+                 "        Onnx2Text -datatype uint8 -dimensions 224,224 Foo.csv Foo.dat\n"
+                 "        Onnx2Text input.npy output.onnxtensor\n"
+                 "\n"
+                 "    Generate tensor from randomness:\n"
+                 "        Onnx2Text -dimensions 3,4 -datatype float16 generate(random,1,24) output.onnxtensor\n"
+                 "\n"
+                 "Parameters:\n"
+                 "        inputfile - either a graph or tensor (see file types below)\n"
+                 "       outputfile - either a graph or tensor (see file types below)\n"
+                 "          -tensor - specifies the input file is a tensor\n"
+                 "                    (only needed if can't tell from file extension, like with .pb).\n"
+                 "           -graph - specifies the input file is a graph model\n"
+                 "                    (only needed if can't tell from file extension, like with .pb).\n"
+                 "      -dimensions - explicit tensor dimensions for .csv or .dat file which do not\n"
+                 "                    store dimensions internally. Defaults to 1D otherwise.\n"
+                 "                    Pass \"[]\" to indicate a 0D scalar.\n"
+                 "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\n"
+                 "                    uint16,int32,uint32,int64,uint64,bool8).\n"
+                 " -zeromodelvalues - zero any tensor values (clears model initializer weights)\n"
+                 "          -rawhex - display as raw hexadecimal when writing .csv\n"
+                 "             -row - single row or range for .csv\n"
+                 "          -column - single column or range for .csv\n"
+                 "           -scale - scale tensor values during conversion\n"
+                 "    -inversescale - scale tensor values during conversion by reciprocal (e.g. 255 means 1/255)\n"
+                 " -normalizevalues - should normalize values in tensor 0 to 1\n"
+                 "     -information - display more verbose file information (output file is not needed)\n"
+                 //"   -channellayout - either nchw or nhwc (needed for images)\n" // Not functional enough to enable yet.
+                 "\n"
+                 "File types:\n"
+                 "    Model file types:\n"
+                 "        .onnx - Open Neural Exchange model protobuf\n"
+                 "        .pb - Google Protobuf (with -graph)\n"
+                 "        .txt/.prototxt - Protobuf text\n"
+                 "    Tensor file types:\n"
+                 "        .onnxtensor - Open Neural Exchange tensor\n"
+                 "        .pb - Google Protobuf (with -tensor)\n"
+                 "        .csv - Comma Separate Value\n"
+                 "        .png - Image (Portable Network Graphics)\n"
+                 "        .jpg - Image (Joint Photographic Experts Group)\n"
+                 "        .npy - NumPyArray single tensor\n"
+                 "        .dat/.bin - Raw binary array (no header)\n"
+                 "        generators - pseudo input filename:\n"
+                 "            generate(ones) - all ones [1,1,1,1...]\n"
+                 "            generate(zeros) - all zeros [0,0,0,0...]\n"
+                 "            generate(values,3) - specific value [3,3,3,3...]\n"
+                 "            generate(iota,1,2) - increasing sequence [1,3,5...]\n"
+                 "            generate(random,1,100) - random values between min/max [31,56,2,69...]\n"
                  ;
 }
 
@@ -3418,7 +3418,7 @@ int Main(int argc, wchar_t** argv)
 
     if (inputFilename.empty() && outputFilename.empty())
     {
-        std::cerr << "No input or output file names given.\r\n";
+        std::cerr << "No input or output file names given.\n";
         PrintUsage();
         return EXIT_FAILURE;
     }
@@ -3426,7 +3426,7 @@ int Main(int argc, wchar_t** argv)
     // Print to console if no output file is given.
     if (outputFilename.empty() && !displayMoreInformation)
     {
-        std::cerr << "No output file names given.\r\n";
+        std::cerr << "No output file names given.\n";
         PrintUsage();
         return EXIT_FAILURE;
     }
@@ -3443,18 +3443,18 @@ int Main(int argc, wchar_t** argv)
         }
     }
 
-    printf("Input filename:  %ls\r\n", inputFilename.c_str());
+    printf("Input filename:  %ls\n", inputFilename.c_str());
     if (!outputFilename.empty())
     {
         printf(
-            "Output filename: %ls\r\n"
-            "Conversion mode: %hs\r\n"
+            "Output filename: %ls\n"
+            "Conversion mode: %hs\n"
             ,
             outputFilename.c_str(),
             ToChar(g_conversionModeNames[uint32_t(conversionMode)])
         );
     }
-    printf("\r\n");
+    printf("\n");
 
     if (conversionMode == ConversionMode::Tensor)
     {
@@ -3535,12 +3535,12 @@ int wmain(int argc, wchar_t** argv)
     }
     catch (std::exception const& e)
     {
-        std::cout << e.what() << "\r\n";
+        std::cout << e.what() << "\n";
         return EXIT_FAILURE;
     }
     catch (...)
     {
-        std::cout << "Unknown error\r\n.";
+        std::cout << "Unknown error\n.";
         return EXIT_FAILURE;
     }
 
