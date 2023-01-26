@@ -81,6 +81,7 @@ inline unsigned char* ToUChar(char8_t* p) { return reinterpret_cast<unsigned cha
 inline unsigned char* ToUChar(std::byte* p) { return reinterpret_cast<unsigned char*>(p); }
 inline char8_t* ToUtf8Char(char* p) { return reinterpret_cast<char8_t*>(p); }
 inline std::u8string_view ToUtf8Char(std::string_view s) { return std::u8string_view(reinterpret_cast<char8_t const*>(s.data()), s.size()); }
+inline std::string_view ToChar(std::u8string_view s) { return std::string_view(reinterpret_cast<char const*>(s.data()), s.size()); }
 
 std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> g_converterToUtf8;
 
@@ -966,27 +967,58 @@ uint32_t ComputeElementCount(span<int32_t const> dimensions)
     return std::accumulate(dimensions.begin(), dimensions.end(), 1, std::multiplies<int32_t>());
 }
 
-// Aligns with onnx::TensorProto::DataType.
-const char8_t* g_elementDataTypeNames[] =
+constexpr size_t ElementDataTypeTotal = onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16 + 1;
+
+struct StringAndIndex
 {
-    u8"undefined",      // Undefined = 0,
-    u8"float32",        // Float32 = 1,
-    u8"uint8",          // Uint8 = 2,
-    u8"int8",           // Int8 = 3,
-    u8"uint16",         // Uint16 = 4,
-    u8"int16",          // Int16 = 5,
-    u8"int32",          // Int32 = 6,
-    u8"int64",          // Int64 = 7,
-    u8"string8",        // StringChar8 = 8,
-    u8"bool8",          // Bool = 9,
-    u8"float16",        // Float16 = 10,
-    u8"float64",        // Float64 = 11,
-    u8"uint32",         // Uint32 = 12,
-    u8"uint64",         // Uint64 = 13,
-    u8"complex64",      // Complex64 = 14,
-    u8"complex128",     // Complex128 = 15,
-    u8"float16m7e8s1",  // BFloat16 = 16,
+    char8_t const* text; // Null terminated.
+    uint32_t index;
 };
+
+// Aligns with onnx::TensorProto::DataType.
+const StringAndIndex g_elementDataTypeNameMappings[] =
+{
+    // Standard names start here. They must be in the same order as onnx::TensorProto_DataType.
+    {u8"undefined",     onnx::TensorProto_DataType::TensorProto_DataType_UNDEFINED},
+    {u8"float32",       onnx::TensorProto_DataType::TensorProto_DataType_FLOAT},
+    {u8"uint8",         onnx::TensorProto_DataType::TensorProto_DataType_UINT8},
+    {u8"int8",          onnx::TensorProto_DataType::TensorProto_DataType_INT8},
+    {u8"uint16",        onnx::TensorProto_DataType::TensorProto_DataType_UINT16},
+    {u8"int16",         onnx::TensorProto_DataType::TensorProto_DataType_INT16},
+    {u8"int32",         onnx::TensorProto_DataType::TensorProto_DataType_INT32},
+    {u8"int64",         onnx::TensorProto_DataType::TensorProto_DataType_INT64},
+    {u8"string8",       onnx::TensorProto_DataType::TensorProto_DataType_STRING},
+    {u8"bool8",         onnx::TensorProto_DataType::TensorProto_DataType_BOOL},
+    {u8"float16",       onnx::TensorProto_DataType::TensorProto_DataType_FLOAT16},
+    {u8"float64",       onnx::TensorProto_DataType::TensorProto_DataType_DOUBLE},
+    {u8"uint32",        onnx::TensorProto_DataType::TensorProto_DataType_UINT32},
+    {u8"uint64",        onnx::TensorProto_DataType::TensorProto_DataType_UINT64},
+    {u8"complex64",     onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX64},
+    {u8"complex128",    onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX128},
+    {u8"float16m7e8s1", onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16},
+
+    // Aliases start here. They can be in any order.
+    {u8"bfloat16",      onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16},
+    {u8"u8",            onnx::TensorProto_DataType::TensorProto_DataType_UINT8},
+    {u8"i8",            onnx::TensorProto_DataType::TensorProto_DataType_INT8},
+    {u8"u16",           onnx::TensorProto_DataType::TensorProto_DataType_UINT16},
+    {u8"i16",           onnx::TensorProto_DataType::TensorProto_DataType_INT16},
+    {u8"u32",           onnx::TensorProto_DataType::TensorProto_DataType_UINT32},
+    {u8"i32",           onnx::TensorProto_DataType::TensorProto_DataType_INT32},
+    {u8"u64",           onnx::TensorProto_DataType::TensorProto_DataType_UINT64},
+    {u8"i64",           onnx::TensorProto_DataType::TensorProto_DataType_INT64},
+    {u8"f16",           onnx::TensorProto_DataType::TensorProto_DataType_FLOAT16},
+    {u8"f32",           onnx::TensorProto_DataType::TensorProto_DataType_FLOAT},
+    {u8"single",        onnx::TensorProto_DataType::TensorProto_DataType_FLOAT},
+    {u8"f64",           onnx::TensorProto_DataType::TensorProto_DataType_DOUBLE},
+    {u8"double",        onnx::TensorProto_DataType::TensorProto_DataType_DOUBLE},
+    {u8"c64",           onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX64},
+    {u8"c128",          onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX128},
+    {u8"s8",            onnx::TensorProto_DataType::TensorProto_DataType_STRING},
+    {u8"b8",            onnx::TensorProto_DataType::TensorProto_DataType_BOOL},
+    {u8"bool",          onnx::TensorProto_DataType::TensorProto_DataType_BOOL},
+};
+static_assert(std::size(g_elementDataTypeNameMappings) >= ElementDataTypeTotal);
 
 constexpr uint32_t g_elementDataTypeByteSizes[] =
 {
@@ -1008,6 +1040,7 @@ constexpr uint32_t g_elementDataTypeByteSizes[] =
     16,// Complex128 = 15,
     2, // BFloat16 = 16,
 };
+static_assert(std::size(g_elementDataTypeByteSizes) == ElementDataTypeTotal);
 
 constexpr bool g_isFloatingPointElementDataType[] =
 {
@@ -1029,11 +1062,26 @@ constexpr bool g_isFloatingPointElementDataType[] =
     true , // Complex128 = 15,
     true , // BFloat16 = 16,
 };
+static_assert(std::size(g_isFloatingPointElementDataType) == ElementDataTypeTotal);
+
+std::optional<uint32_t> TryMapStringToIndex(std::u8string_view text, span<const StringAndIndex> nameAndIndexList) noexcept
+{
+    for (auto& nameAndIndex : nameAndIndexList)
+    {
+        if (strncmp(ToChar(nameAndIndex.text), ToChar(text.data()), text.size()) == 0)
+        {
+            return nameAndIndex.index;
+        }
+    }
+
+    return {};
+}
 
 std::u8string_view GetStringNameFromDataType(onnx::TensorProto::DataType dataType) noexcept
 {
     size_t index = static_cast<size_t>(dataType);
-    return g_elementDataTypeNames[index < std::size(g_elementDataTypeNames) ? index : 0];
+    size_t constexpr indexEnd = std::min(ElementDataTypeTotal, std::size(g_elementDataTypeNameMappings));
+    return g_elementDataTypeNameMappings[(index < indexEnd) ? index : 0].text;
 }
 
 uint32_t GetByteSizeFromDataType(onnx::TensorProto::DataType dataType) noexcept
@@ -1049,16 +1097,17 @@ uint32_t GetByteSizeFromDimensions(span<int32_t const> dimensions, onnx::TensorP
 
 onnx::TensorProto::DataType GetDataTypeFromStringName(std::u8string_view name) noexcept
 {
-    auto i = std::find(std::begin(g_elementDataTypeNames), std::end(g_elementDataTypeNames), name);
-    return (i == std::end(g_elementDataTypeNames))
-        ? onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED
-        : onnx::TensorProto::DataType(i - std::begin(g_elementDataTypeNames));
+    auto match = TryMapStringToIndex(name, g_elementDataTypeNameMappings);
+    if (!match)
+        return onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED;
+
+    return onnx::TensorProto::DataType(*match);
 }
 
 bool IsFloatingPointDataType(onnx::TensorProto::DataType dataType) noexcept
 {
     size_t index = static_cast<size_t>(dataType);
-    return g_isFloatingPointElementDataType[index < std::size(g_elementDataTypeNames) ? index : 0];
+    return g_isFloatingPointElementDataType[index < std::size(g_isFloatingPointElementDataType) ? index : 0];
 }
 
 bool IsRecognizedChannelLayoutString(std::u8string_view channelLayoutString)
@@ -1440,7 +1489,7 @@ void AppendOnnxDataTypeToNumPyArray(
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:  characterCode = u8"f2" /*'f'*/; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:    characterCode = u8"f4" /*'f'*/; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:   characterCode = u8"f8" /*'d'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16: throw std::ios::failure("NumPy does not support the bfloat16 data type (as of 2023-01-25).");
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16: throw std::ios::failure("NumPy does not support the float16m7e8s1 (bfloat16) data type (as of 2023-01-25).");
     default: throw std::ios::failure("Unknown data type unsupported by the NumPy writer.");
     }
     numPyElementType.append(characterCode);
@@ -3243,7 +3292,7 @@ void PrintUsage()
                  "                    store dimensions internally. Defaults to 1D otherwise.\n"
                  "                    Pass \"[]\" to indicate a 0D scalar.\n"
                  "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\n"
-                 "                    uint16,int32,uint32,int64,uint64,bool8,float16m7e8s1).\n"
+                 "                    uint16,int32,uint32,int64,uint64,bool8,float16m7e8s1/bfloat16).\n"
                  " -zeromodelvalues - zero any tensor values (clears model initializer weights)\n"
                  "          -rawhex - display as raw hexadecimal when writing .csv\n"
                  "             -row - single row or range for .csv\n"

@@ -48,7 +48,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Parameters
 * input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
 * `-dimensions` - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "()" to indicate 0D scalar.
-* `-datatype` - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8). This isn't usually needed unless reading from raw data.
+* `-datatype` - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8,float16m7e8s1/bfloat16). This isn't usually needed unless reading from raw data.
 * `-zeromodelvalues` - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
 * `-row` - single row or range for .csv.
 * `-column` - single column or range for .csv.
