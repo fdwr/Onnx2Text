@@ -20,6 +20,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 - Convert model to/from ONNX binary protobuf and prototxt format:
     - `Onnx2Text input.onnx output.prototxt`  <i>plain `.txt` works too</i>
     - `Onnx2Text input.prototxt output.onnx`
+    - `Onnx2Text input.prototxt con:` // to console
 
 - Just show information like how many of each operator is used:
     - `Onnx2Text -information model.onnx`

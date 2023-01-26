@@ -1,5 +1,6 @@
-#define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google protobuf using std::iterator as a base class in C++17.
+#define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google Protobuf using std::iterator as a base class in C++17.
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
+#define _SILENCE_CXX20_IS_POD_DEPRECATION_WARNING 1 // For Google Protobuf std::is_pod in generated_message_table_driven.h.
 #define NOMINMAX
 
 #include <iostream>
@@ -14,7 +15,9 @@
 #include <random>
 
 #pragma warning(push)
-#pragma warning(disable: 4146)
+#pragma warning(disable: 4146) // unary minus operator applied to unsigned type, result still unsigned
+#pragma warning(disable: 4125) // decimal digit terminates octal escape sequence
+#pragma warning(disable: 5054 ) // deprecated between enumerations of different types
 #include "onnx.pb.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/any.pb.h"
@@ -28,7 +31,41 @@
 #include <wrl/client.h>
 #include <wincodec.h>
 
+// Float16 support.
+
 using float16 = half_float::half;
+
+// Truncated IEEE 32-bit floating type to 16-bits (so called "brain float").
+struct float16m7e8s1_t
+{
+    float16m7e8s1_t() = default;
+    float16m7e8s1_t(const float16m7e8s1_t&) = default;
+    float16m7e8s1_t(float16m7e8s1_t&&) = default;
+
+    float16m7e8s1_t(float floatValue) noexcept
+    {
+        value = reinterpret_cast<uint32_t&>(floatValue) >> 16;
+    }
+
+    float16m7e8s1_t& operator =(const float16m7e8s1_t&) = default;
+
+    inline float16m7e8s1_t& operator =(float floatValue) noexcept
+    {
+        new(this) float16m7e8s1_t(floatValue);
+        return *this;
+    }
+
+    operator float() const noexcept
+    {
+        float floatValue = 0.0;
+        reinterpret_cast<uint32_t&>(floatValue) = value << 16;
+        return floatValue;
+    }
+
+    uint16_t value;
+};
+
+// String helpers
 
 inline char ToChar(std::byte c) { return static_cast<char>(c); }
 inline char* ToChar(std::byte* p) { return reinterpret_cast<char*>(p); }
@@ -498,6 +535,7 @@ size_t GetDataTypeElementByteSize(onnx::TensorProto::DataType dataType)
     switch (dataType)
     {
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    return 2;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   return 2;
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      return 4;
     case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     return 8;
     case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       return 1;
@@ -539,6 +577,7 @@ CsvValueNumberClass GetCsvValueNumberClass(
     switch (dataType)
     {
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    valueNumberClass = CsvValueNumberClass::Float; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   valueNumberClass = CsvValueNumberClass::Float; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      valueNumberClass = CsvValueNumberClass::Float; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     valueNumberClass = CsvValueNumberClass::Float; break;
     case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  valueNumberClass = CsvValueNumberClass::Float; break;
@@ -573,6 +612,7 @@ void WriteTensorValue(
     switch (dataType)
     {
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    *reinterpret_cast<float16*> (data) = static_cast<float>   (value.floatValue); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   *reinterpret_cast<float16m7e8s1_t*>(data) = static_cast<float>(value.floatValue); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     *reinterpret_cast<double*>  (data) = static_cast<double>  (value.floatValue); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  *reinterpret_cast<float*>   (data) = static_cast<float>   (value.floatValue); break;
@@ -724,6 +764,7 @@ void ReadCsv(
                 case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:
                 case onnx::TensorProto::DataType::TensorProto_DataType_INT16:
                 case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:
+                case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:
                     *reinterpret_cast<uint16_t*>(data) = static_cast<uint16_t>(value.uintValue); break;
                 case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:
                 case onnx::TensorProto::DataType::TensorProto_DataType_INT32:
@@ -838,6 +879,7 @@ void WriteCsv(
             case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:
             case onnx::TensorProto::DataType::TensorProto_DataType_INT16:
             case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:
+            case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:
                 value.uintValue = *reinterpret_cast<const uint16_t*>(data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:
             case onnx::TensorProto::DataType::TensorProto_DataType_INT32:
@@ -856,6 +898,8 @@ void WriteCsv(
         {
             switch (dataType)
             {
+            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    value.floatValue = *reinterpret_cast<const float16*> (data); break;
+            case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   value.floatValue = *reinterpret_cast<const float16m7e8s1_t*>(data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      value.floatValue = *reinterpret_cast<const float*>   (data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     value.floatValue = *reinterpret_cast<const double*>  (data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       value.uintValue  = *reinterpret_cast<const bool*>    (data); break;
@@ -869,7 +913,6 @@ void WriteCsv(
             case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      value.intValue   = *reinterpret_cast<const int64_t*> (data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  value.floatValue = *reinterpret_cast<const float*>   (data); break;
             case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: value.floatValue = *reinterpret_cast<const double*>  (data); break;
-            case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    value.floatValue = *reinterpret_cast<const float16*> (data); break;
             default: throw std::ios::failure("Unsupported data type in tensor for CSV output.");
             }
         }
@@ -926,22 +969,23 @@ uint32_t ComputeElementCount(span<int32_t const> dimensions)
 // Aligns with onnx::TensorProto::DataType.
 const char8_t* g_elementDataTypeNames[] =
 {
-    u8"undefined",    // Undefined = 0,
-    u8"float32",      // Float32 = 1,
-    u8"uint8",        // Uint8 = 2,
-    u8"int8",         // Int8 = 3,
-    u8"uint16",       // Uint16 = 4,
-    u8"int16",        // Int16 = 5,
-    u8"int32",        // Int32 = 6,
-    u8"int64",        // Int64 = 7,
-    u8"string8",      // StringChar8 = 8,
-    u8"bool8",        // Bool = 9,
-    u8"float16",      // Float16 = 10,
-    u8"float64",      // Float64 = 11,
-    u8"uint32",       // Uint32 = 12,
-    u8"uint64",       // Uint64 = 13,
-    u8"complex64",    // Complex64 = 14,
-    u8"complex128",   // Complex128 = 15,
+    u8"undefined",      // Undefined = 0,
+    u8"float32",        // Float32 = 1,
+    u8"uint8",          // Uint8 = 2,
+    u8"int8",           // Int8 = 3,
+    u8"uint16",         // Uint16 = 4,
+    u8"int16",          // Int16 = 5,
+    u8"int32",          // Int32 = 6,
+    u8"int64",          // Int64 = 7,
+    u8"string8",        // StringChar8 = 8,
+    u8"bool8",          // Bool = 9,
+    u8"float16",        // Float16 = 10,
+    u8"float64",        // Float64 = 11,
+    u8"uint32",         // Uint32 = 12,
+    u8"uint64",         // Uint64 = 13,
+    u8"complex64",      // Complex64 = 14,
+    u8"complex128",     // Complex128 = 15,
+    u8"float16m7e8s1",  // BFloat16 = 16,
 };
 
 constexpr uint32_t g_elementDataTypeByteSizes[] =
@@ -962,6 +1006,7 @@ constexpr uint32_t g_elementDataTypeByteSizes[] =
     8, // Uint64 = 13,
     8, // Complex64 = 14,
     16,// Complex128 = 15,
+    2, // BFloat16 = 16,
 };
 
 constexpr bool g_isFloatingPointElementDataType[] =
@@ -982,6 +1027,7 @@ constexpr bool g_isFloatingPointElementDataType[] =
     false, // Uint64 = 13,
     true , // Complex64 = 14,
     true , // Complex128 = 15,
+    true , // BFloat16 = 16,
 };
 
 std::u8string_view GetStringNameFromDataType(onnx::TensorProto::DataType dataType) noexcept
@@ -1356,6 +1402,7 @@ void MapNumPyArrayDataTypeToOnnx(
             case 4: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_FLOAT; break;
             case 8: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE; break;
             default: resolvedDataType = onnx::TensorProto::DataType::TensorProto_DataType_UNDEFINED; break;
+            // No way to deduce onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16 from NumPy.
             }
             break;
 
@@ -1380,20 +1427,21 @@ void AppendOnnxDataTypeToNumPyArray(
     std::u8string_view characterCode;
     switch (dataType)
     {
-    //                                                              Explicit sized type    Short alias
-    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:    characterCode = u8"?"  /*'?'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:    characterCode = u8"i1" /*'b'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:   characterCode = u8"u1" /*'B'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:   characterCode = u8"i2" /*'h'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:   characterCode = u8"i4" /*'i'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:   characterCode = u8"i8" /*'i'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:  characterCode = u8"u2" /*'H'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:  characterCode = u8"u4" /*'u'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:  characterCode = u8"u8" /*'u'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16: characterCode = u8"f2" /*'f'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:   characterCode = u8"f4" /*'f'*/; break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:  characterCode = u8"f8" /*'d'*/; break;
-    default: characterCode = u8"?";  assert(false);
+    //                                                               Explicit sized type    Short alias
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:     characterCode = u8"?"  /*'?'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:     characterCode = u8"i1" /*'b'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:    characterCode = u8"u1" /*'B'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:    characterCode = u8"i2" /*'h'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:    characterCode = u8"i4" /*'i'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT64:    characterCode = u8"i8" /*'i'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:   characterCode = u8"u2" /*'H'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:   characterCode = u8"u4" /*'u'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT64:   characterCode = u8"u8" /*'u'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:  characterCode = u8"f2" /*'f'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:    characterCode = u8"f4" /*'f'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:   characterCode = u8"f8" /*'d'*/; break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16: throw std::ios::failure("NumPy does not support the bfloat16 data type (as of 2023-01-25).");
+    default: throw std::ios::failure("Unknown data type unsupported by the NumPy writer.");
     }
     numPyElementType.append(characterCode);
 }
@@ -1831,8 +1879,7 @@ void CopyOnnxTensorDataToBuffer(
     )
 {
     static_assert(sizeof(*outputContainer.begin()) == 1);
-    constexpr size_t outputElementSize = sizeof(OutputElementType);
-    outputContainer.resize(elementCount * outputElementSize);
+    outputContainer.resize(elementCount * sizeof(OutputElementType));
 
     span<OutputElementType> outputValues = reinterpret_span<OutputElementType>(outputContainer);
     size_t index = 0;
@@ -1856,6 +1903,7 @@ std::vector<std::byte> GetOnnxTensorRawByteData(onnx::TensorProto const& tensor)
         switch (tensor.data_type())
         {
         case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  bytes); break;
+        case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  bytes); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  bytes); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), bytes); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       CopyOnnxTensorDataToBuffer<bool>    (tensor.int32_data().begin(),  tensor.int32_data().end(),  tensor.int32_data_size(),  bytes); break;
@@ -2238,7 +2286,9 @@ void LoadModel(
 
     if (!succeeded)
     {
-        throw std::ios::failure("Could not load input graph file.");
+        char buffer[512];
+        sprintf_s(buffer, std::size(buffer), "Could not load input graph file: %S", inputFilename);
+        throw std::ios::failure(std::string(buffer));
     }
 
     if (shouldZeroModelValues)
@@ -2542,6 +2592,8 @@ void ConvertElementTypeToUInt8Clamped(
 
     switch (dataType)
     {
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16:    ConvertElementTypeToUInt8Clamped<float16>(source.data(), destination.data(), sourceElementCount); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:   ConvertElementTypeToUInt8Clamped<float16m7e8s1_t>(source.data(), destination.data(), sourceElementCount); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:      ConvertElementTypeToUInt8Clamped<float>   (source.data(), destination.data(), sourceElementCount); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:     ConvertElementTypeToUInt8Clamped<double>  (source.data(), destination.data(), sourceElementCount); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:       ConvertElementTypeToUInt8Clamped<bool>    (source.data(), destination.data(), sourceElementCount); break;
@@ -2555,7 +2607,6 @@ void ConvertElementTypeToUInt8Clamped(
     case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      ConvertElementTypeToUInt8Clamped<int64_t> (source.data(), destination.data(), sourceElementCount); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  ConvertElementTypeToUInt8Clamped<float, sizeof(float)*2>(source.data(), destination.data(), sourceElementCount); break;
     case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: ConvertElementTypeToUInt8Clamped<double, sizeof(double)*2>(source.data(), destination.data(), sourceElementCount); break;
-    // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16
     default: throw std::ios::failure("Unsupported data type in tensor.");
     }
 }
@@ -3144,7 +3195,7 @@ void StoreTensor(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "Onnx2Text 2018-07-19..2022-10-21 FDwR\n"
+    std::cout << "Onnx2Text 2018-07-19..2023-01-25 FDwR\n"
                  "\n"
                  "Converts:\n"
                  "    - binary ONNX model file to proto text and back.\n"
@@ -3159,6 +3210,7 @@ void PrintUsage()
                  "    Convert model to/from ONNX binary protobuf and prototxt format:\n"
                  "        Onnx2Text input.onnx output.prototxt\n"
                  "        Onnx2Text input.prototxt output.onnx\n"
+                 "        Onnx2Text input.onnx con:\n"
                  "\n"
                  "    Write GraphViz dot file (download GraphViz separately):\n"
                  "        Onnx2Text input.onnx output.dot\n"
@@ -3191,7 +3243,7 @@ void PrintUsage()
                  "                    store dimensions internally. Defaults to 1D otherwise.\n"
                  "                    Pass \"[]\" to indicate a 0D scalar.\n"
                  "        -datatype - tensor element type (float16,float32,float64,int8,uint8,int16,\n"
-                 "                    uint16,int32,uint32,int64,uint64,bool8).\n"
+                 "                    uint16,int32,uint32,int64,uint64,bool8,float16m7e8s1).\n"
                  " -zeromodelvalues - zero any tensor values (clears model initializer weights)\n"
                  "          -rawhex - display as raw hexadecimal when writing .csv\n"
                  "             -row - single row or range for .csv\n"
@@ -3529,6 +3581,7 @@ int Main(int argc, wchar_t** argv)
 
 int wmain(int argc, wchar_t** argv)
 {
+    assert(false);
     try
     {
         return Main(argc, argv);
