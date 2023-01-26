@@ -3581,7 +3581,6 @@ int Main(int argc, wchar_t** argv)
 
 int wmain(int argc, wchar_t** argv)
 {
-    assert(false);
     try
     {
         return Main(argc, argv);
