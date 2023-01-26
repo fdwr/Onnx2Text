@@ -995,7 +995,11 @@ const StringAndIndex g_elementDataTypeNameMappings[] =
     {u8"uint64",        onnx::TensorProto_DataType::TensorProto_DataType_UINT64},
     {u8"complex64",     onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX64},
     {u8"complex128",    onnx::TensorProto_DataType::TensorProto_DataType_COMPLEX128},
-    {u8"float16m7e8s1", onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16},
+    {u8"float16f7e8s1", onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16},
+
+    // TODO: Whenever ONNX adds float8 data types.
+    // {u8"float8f2e5s1", onnx::TensorProto_DataType::TensorProto_DataType_FLOAT8F2E5S1},
+    // {u8"float8f3e4s1", onnx::TensorProto_DataType::TensorProto_DataType_FLOAT8F3E4S1},
 
     // Aliases start here. They can be in any order.
     {u8"bfloat16",      onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16},
@@ -1966,6 +1970,9 @@ std::vector<std::byte> GetOnnxTensorRawByteData(onnx::TensorProto const& tensor)
         case onnx::TensorProto::DataType::TensorProto_DataType_INT64:      CopyOnnxTensorDataToBuffer<int64_t> (tensor.int64_data().begin(),  tensor.int64_data().end(),  tensor.int64_data_size(),  bytes); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX64:  CopyOnnxTensorDataToBuffer<float>   (tensor.float_data().begin(),  tensor.float_data().end(),  tensor.float_data_size(),  bytes); break;
         case onnx::TensorProto::DataType::TensorProto_DataType_COMPLEX128: CopyOnnxTensorDataToBuffer<double>  (tensor.double_data().begin(), tensor.double_data().end(), tensor.double_data_size(), bytes); break;
+        // TODO: Whenever ONNX adds float8 data types.
+        // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT8F2E5S1: CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(), tensor.int32_data().end(), tensor.int32_data_size(), bytes); break;
+        // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT8F3E4S1: CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(), tensor.int32_data().end(), tensor.int32_data_size(), bytes); break;
         default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
         }
     }
