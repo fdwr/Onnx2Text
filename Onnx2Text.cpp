@@ -1973,7 +1973,7 @@ std::vector<std::byte> GetOnnxTensorRawByteData(onnx::TensorProto const& tensor)
         // TODO: Whenever ONNX adds float8 data types.
         // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT8F2E5S1: CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(), tensor.int32_data().end(), tensor.int32_data_size(), bytes); break;
         // case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT8F3E4S1: CopyOnnxTensorDataToBuffer<uint16_t>(tensor.int32_data().begin(), tensor.int32_data().end(), tensor.int32_data_size(), bytes); break;
-        default: throw std::ios::failure("Unsupported data type in tensor for raw output.");
+        default: throw std::ios::failure("Unsupported data type in tensor.");
         }
     }
 
