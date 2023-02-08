@@ -2332,6 +2332,7 @@ void LoadModel(
         // except that we need to pass the flag to allow field numbers.
 
         google::protobuf::TextFormat::Parser parser;
+        parser.AllowPartialMessage(true);
         parser.AllowFieldNumber(true);
         succeeded = parser.ParseFromString(modelString, &model);
     }
