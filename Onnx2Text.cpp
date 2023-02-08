@@ -25,11 +25,16 @@
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #pragma warning(pop)
 
+// Disable useless warnings.
+#pragma warning(disable: 4100) // unreferenced formal parameter - yeah, it's intentional
+
 #include "half/half.hpp"
 
-#include <d3d12.h>
+#undef _WIN32
+#ifdef _WIN32
 #include <wrl/client.h>
 #include <wincodec.h>
+#endif
 
 // Float16 support.
 
@@ -114,6 +119,7 @@ inline std::u16string ToUtf16String(std::u8string_view source)
     return dest;
 }
 
+#ifdef _WIN32
 extern "C"
 {
     HRESULT WINAPI WICCreateImagingFactory_Proxy(
@@ -123,8 +129,6 @@ extern "C"
 }
 
 using Microsoft::WRL::ComPtr;
-
-////////////////////////////////////////////////////////////////////////////////
 
 void ThrowBadHResultRuntimeErrorWithMessage(HRESULT hr)
 {
@@ -138,6 +142,11 @@ void ThrowBadHResultRuntimeErrorWithMessage(HRESULT hr)
 #ifndef THROW_IF_FAILED
 #define THROW_IF_FAILED(hr) {HRESULT localHr = (hr); if (FAILED(localHr)) ThrowBadHResultRuntimeErrorWithMessage(localHr);}
 #endif
+
+#endif // _WIN32
+
+
+////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
 class span
@@ -351,6 +360,7 @@ template<
 auto append_data(ContiguousContainerType& v, span<ElementType const> s)
 {
     // Whyyyy is basic functionality like std::vector::append() missing from the standard? -_-
+    // Thankfully C++23 adds append_range!
     v.insert(v.end(), s.begin(), s.end());
 }
 
@@ -2488,6 +2498,7 @@ void StoreModel(
     }
 }
 
+#ifdef _WIN32
 struct PixelFormatAttributes
 {
     std::u8string_view pixelFormatString;
@@ -2589,6 +2600,7 @@ bool ResolvePixelFormat(
     }
     return false;
 }
+#endif // _WIN32
 
 // Downcasts a given element type to uint8 (e.g. for pixel imagery).
 template <typename T, size_t sourceElementByteStride = sizeof(T)>
@@ -2667,6 +2679,7 @@ void ConvertElementTypeToUInt8Clamped(
     }
 }
 
+#ifdef _WIN32
 void LoadImageData(
     _In_z_ wchar_t const* inputFilename, // Alternately could specify a span<const uint8_t>.
     std::u8string_view pixelFormatString,
@@ -2693,7 +2706,7 @@ void LoadImageData(
 
     THROW_IF_FAILED(wicFactory->CreateStream(&stream));
     THROW_IF_FAILED(stream->InitializeFromFilename(inputFilename, GENERIC_READ));
-    #if 0
+    #if 0 // To initialize from a memory buffer instead.
     THROW_IF_FAILED(stream->InitializeFromMemory(
         const_cast<uint8_t*>(fileBytes.data()),
         static_cast<uint32_t>(fileBytes.size_bytes()))
@@ -2852,6 +2865,7 @@ void StoreImageData(
     THROW_IF_FAILED(bitmapFrame->Commit());
     THROW_IF_FAILED(encoder->Commit());
 }
+#endif // _WIN32
 
 void GenerateTensorSequence(
     std::wstring_view fileName,
@@ -3085,6 +3099,7 @@ void LoadTensor(
     }
     else if (inputFileType == FileType::Image)
     {
+    #ifdef _WIN32
         std::vector<std::byte> pixelBytes;
         LoadImageData(
             inputFilename,
@@ -3096,6 +3111,9 @@ void LoadTensor(
 
         RearrangeChannels(dataType, resolvedDimensions, u8"nhwc", channelLayoutString, /*inout*/ pixelBytes);
         MakeTensor(pixelBytes, dataType, resolvedDimensions, u8"", /*out*/ tensor);
+    #else
+        throw std::invalid_argument("Image support only works on Windows because it uses the Windows Imaging Component.");
+    #endif // _WIN32
     }
     else if (inputFileType == FileType::TensorGenerator)
     {
@@ -3220,6 +3238,7 @@ void StoreTensor(
     }
     else if (outputFileType == FileType::Image)
     {
+    #ifdef _WIN32
         getArrayByteData();
         std::vector<std::byte> pixelBytes(arrayByteData.data(), arrayByteData.data() + arrayByteData.size());
         RearrangeChannels(
@@ -3236,6 +3255,9 @@ void StoreTensor(
             resolvedDimensions,
             outputFilename
             );
+    #else
+        throw std::invalid_argument("Image support only works on Windows because it uses the Windows Imaging Component.");
+    #endif // _WIN32
     }
     else
     {
