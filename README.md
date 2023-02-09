@@ -33,8 +33,8 @@ I needed to make small edits to existing models for debugging, and I didn't want
     - `Onnx2Text -zeromodelvalues input.onnx output.onnx`
 
 - Export model from ONNX protobuf to NumPy tensors/data files:
-    - `Onnx2Text resnet50.onnx x:\\resnet_*.npy`
-    - `Onnx2Text squeezenet.onnx z:\\folder\\*_weight.dat`
+    - `Onnx2Text resnet50.onnx x:\resnet_*.npy`
+    - `Onnx2Text squeezenet.onnx z:\folder\*_weight.dat`
 
 - Convert tensor between ONNX protobuf, CSV, raw data, numpy, PNG:
     - `Onnx2Text input.onnxtensor output.csv`
