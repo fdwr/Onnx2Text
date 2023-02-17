@@ -2380,8 +2380,8 @@ void StoreModel(
         // Use the stream instead of google::protobuf::TextFormat::PrintToString,
         // which can fail for models that are >= 200MBs by running out of memory.
         std::ofstream outputFile(outputFilename, std::ios::out);
-        std::unique_ptr<google::protobuf::io::ZeroCopyOutputStream> output(new google::protobuf::io::OstreamOutputStream(&outputFile));
-        succeeded = google::protobuf::TextFormat::Print(model, output.get());
+        google::protobuf::io::OstreamOutputStream output(&outputFile);
+        succeeded = google::protobuf::TextFormat::Print(model, &output);
     }
     else if (outputFileType == FileType::OnnxModel
           || outputFileType == FileType::GoogleProtobuf)
@@ -2398,7 +2398,7 @@ void StoreModel(
 
         std::wstring initialFileName(outputFilename);
         std::wstring currentFileName(outputFilename);
-        size_t substitutionOffset = initialFileName.find('*', 0);
+        size_t substitutionOffset = initialFileName.find('*', 0); // Find wildcard in filename mask.
         if (substitutionOffset != std::wstring::npos)
         {
             initialFileName.erase(substitutionOffset, 1);
