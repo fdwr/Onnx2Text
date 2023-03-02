@@ -3549,8 +3549,14 @@ int Main(int argc, wchar_t** argv)
 
     if (inputFilename.empty() && outputFilename.empty())
     {
-        std::cerr << "No input or output file names given.\n";
-        PrintUsage();
+        if (argc > 1)
+        {
+            std::cerr << "No input or output file names given.\n";
+        }
+        else
+        {
+            PrintUsage();
+        }
         return EXIT_FAILURE;
     }
 
@@ -3558,7 +3564,6 @@ int Main(int argc, wchar_t** argv)
     if (outputFilename.empty() && !displayMoreInformation)
     {
         std::cerr << "No output file names given.\n";
-        PrintUsage();
         return EXIT_FAILURE;
     }
 
