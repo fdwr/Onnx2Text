@@ -30,7 +30,6 @@
 
 #include "half/half.hpp"
 
-#undef _WIN32
 #ifdef _WIN32
 #include <wrl/client.h>
 #include <wincodec.h>
