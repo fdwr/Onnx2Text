@@ -1362,15 +1362,17 @@ std::pair<double, double> ArrayMinMax(
 {
     switch (dataType)
     {
-    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   return ArrayMinMax<bool    , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  return ArrayMinMax<uint8_t , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: return ArrayMinMax<uint16_t, double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: return ArrayMinMax<uint32_t, double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   return ArrayMinMax<int8_t  , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  return ArrayMinMax<int16_t , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  return ArrayMinMax<int32_t , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  return ArrayMinMax<float   , double>(arrayByteData);
-    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: return ArrayMinMax<double  , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:    return ArrayMinMax<bool           , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:   return ArrayMinMax<uint8_t        , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:  return ArrayMinMax<uint16_t       , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:  return ArrayMinMax<uint32_t       , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:    return ArrayMinMax<int8_t         , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:   return ArrayMinMax<int32_t        , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16: return ArrayMinMax<float16        , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:   return ArrayMinMax<int16_t        , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:return ArrayMinMax<float16m7e8s1_t, double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:   return ArrayMinMax<float          , double>(arrayByteData);
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:  return ArrayMinMax<double         , double>(arrayByteData);
     default:
         assert(false); // Could not have reached here because we only set a known subset.
         return { 0.0, 1.0 };
