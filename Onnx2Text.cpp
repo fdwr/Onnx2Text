@@ -1286,6 +1286,8 @@ void SwapBytes(/*inout*/ span<uint8_t> arrayByteData, uint32_t elementByteSize)
     }
 }
 
+#pragma warning(push)
+#pragma warning(disable:4244) // Doesn't matter - 'argument' : conversion from 'double' to 'float', possible loss of data
 template<typename DataType>
 void RescaleArray(
     double prebias,
@@ -1294,8 +1296,8 @@ void RescaleArray(
     )
 {
     auto recastedData = reinterpret_span<DataType>(arrayByteData);
-    constexpr double lowestValue  = double(std::numeric_limits<DataType>::lowest());
-    constexpr double highestValue = double(std::numeric_limits<DataType>::max());
+    double lowestValue  = double(std::numeric_limits<DataType>::lowest());
+    double highestValue = double(std::numeric_limits<DataType>::max());
     auto functor = [=](DataType& v)
     {
         double clampedValue = std::clamp<double>((v + prebias) * scale, lowestValue, highestValue);
@@ -1304,6 +1306,7 @@ void RescaleArray(
 
     std::for_each(recastedData.begin(), recastedData.end(), functor);
 }
+#pragma warning(pop)
 
 void RescaleArray(
     onnx::TensorProto::DataType dataType,
@@ -1314,15 +1317,17 @@ void RescaleArray(
 {
     switch (dataType)
     {
-    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:   RescaleArray<bool    >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:  RescaleArray<uint8_t >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16: RescaleArray<uint16_t>(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32: RescaleArray<uint32_t>(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:   RescaleArray<int8_t  >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:  RescaleArray<int16_t >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:  RescaleArray<int32_t >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:  RescaleArray<float   >(prebias, scale, /*inout*/ arrayByteData); break;
-    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE: RescaleArray<double  >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BOOL:    RescaleArray<bool           >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT8:   RescaleArray<uint8_t        >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT16:  RescaleArray<uint16_t       >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_UINT32:  RescaleArray<uint32_t       >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT8:    RescaleArray<int8_t         >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT16:   RescaleArray<int16_t        >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_INT32:   RescaleArray<int32_t        >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT16: RescaleArray<float16        >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_BFLOAT16:RescaleArray<float16m7e8s1_t>(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_FLOAT:   RescaleArray<float          >(prebias, scale, /*inout*/ arrayByteData); break;
+    case onnx::TensorProto::DataType::TensorProto_DataType_DOUBLE:  RescaleArray<double         >(prebias, scale, /*inout*/ arrayByteData); break;
     default:
         assert(false); // Could not have reached here because we only set a known subset.
     }
