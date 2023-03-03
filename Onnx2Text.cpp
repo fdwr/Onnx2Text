@@ -3393,7 +3393,7 @@ void RescaleValues(
 void PrintUsage()
 {
     // Credits, examples, and option help.
-    std::cout << "Onnx2Text 2018-07-19..2023-01-25 FDwR\n"
+    std::cout << "Onnx2Text 2018-07-19..2023-03-02 FDwR\n"
                  "\n"
                  "Converts:\n"
                  "    - binary ONNX model file to proto text and back.\n"
