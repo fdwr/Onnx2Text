@@ -18,6 +18,9 @@
 #pragma warning(disable: 4146) // unary minus operator applied to unsigned type, result still unsigned
 #pragma warning(disable: 4125) // decimal digit terminates octal escape sequence
 #pragma warning(disable: 5054 ) // deprecated between enumerations of different types
+#ifdef __clang__
+#define GOOGLE_PROTOBUF_MISSING_HASH // For Google Protobuf hash.h with clang (protobuf-3.5.1\src\google\protobuf\stubs\hash.h).
+#endif
 #include "onnx.pb.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/any.pb.h"
