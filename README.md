@@ -10,19 +10,19 @@ Dwayne Robinson (FDwR)
 
 # Motivation
 
-I needed to make small edits to existing models for debugging, and I didn't want to have to write actual code every time, but rather just use a command line tool. Additionally I needed a simple tool that predictably _just worked_ by itself regardless of what machine I'm using and is easily shareable (not a tool that depends on your current environment and needed pip install this or pip install that, but oops, not that incompatible version of the library, and don't forget to install Cmake and protobuf and add them to your path before the egg/wheel thingie is built 😑).
+I needed to make small edits to existing models for debugging, and I didn't want to have to write actual code every time, but rather just use a command line tool. Additionally I needed a simple tool that predictably _just worked_ by itself regardless of what machine I'm using and is easily shareable (not a tool that depends on your current environment and needed pip install this or pip install that, but oops, not that incompatible version of the library, and don't forget to install Cmake and protobuf and add them to your path before the egg/wheel thingie is built... 😑).
 
 # Usage
     Onnx2Text.exe [options] inputFilename outputFilename
 
 # Example usage
 
-- Convert model to/from ONNX binary protobuf and prototxt format:
+- Convert model to/from ONNX binary protobuf and prototxt format (open with Notepad):
     - `Onnx2Text input.onnx output.prototxt`  <i>plain `.txt` works too</i>
     - `Onnx2Text input.prototxt output.onnx`
-    - `Onnx2Text input.prototxt con:` // to console
+    - `Onnx2Text input.prototxt con:` // print to console
 
-- Just show information like how many of each operator is used:
+- Just show information like how many times each operator is used:
     - `Onnx2Text -information model.onnx`
 
 - Write GraphViz dot file (download GraphViz separately):
@@ -82,7 +82,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Building
 Load Visual Studio solution (Onnx2Text.sln), and build.
 
-The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it *could* likely compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Though, I don't use Linux frequently enough to support that.
+*Linux* The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it might compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Clang builds it okay, but I don't know about  Though, I don't use Linux frequently enough to support that target. 
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
