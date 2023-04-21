@@ -82,7 +82,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Building
 Load Visual Studio solution (Onnx2Text.sln), and build.
 
-*Linux* The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it might compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Clang builds it okay, but I don't know about  Though, I don't use Linux frequently enough to support that target. 
+The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it *might* compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Though, I don't use Linux frequently enough to support that target. 
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
