@@ -2253,7 +2253,7 @@ outputorder=edgesfirst;
     char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
     char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
 
-    auto nodes = onnxGraph.node();
+    auto const& nodes = onnxGraph.node();
     std::vector<std::string> sanitizedNodeNames;
     sanitizedNodeNames.reserve(nodes.size());
     std::set<std::string, std::less<>> constantTensors;
@@ -2508,16 +2508,11 @@ std::u8string GetWebNNTensorDescDefinition(
     return output;
 }
 
-void ConvertOnnxToWebNNJavascript(
-    onnx::ModelProto const& model,
-    std::ofstream& outputFile
-)
-{
-    std::map<std::u8string, uint32_t> freeDimensionMap; // TODO: Pass in as parameter.
-    const onnx::GraphProto& onnxGraph = model.graph();
+// TODO: Add comment
+// import {CreateMlContextAndBuilder} from "./convertedModel.webnn.js";
 
-    char const* header =
-        R"(async function CreateMlContextAndBuilder()
+char const* webnnCreateContextFunctionString =
+R"(export async function CreateMlContextAndBuilder()
 {
     if (typeof MLGraphBuilder !== 'undefined')
     {
@@ -2525,14 +2520,14 @@ void ConvertOnnxToWebNNJavascript(
         return;
     }
     console.log("navigator.ml.createContext(...);");
-    mlContext = await navigator.ml.createContext({devicePreference: 'gpu'});
+    let mlContext = await navigator.ml.createContext({devicePreference: 'gpu'});
     if (mlContext == null)
     {
         console.log("navigator.ml.createContext returned null");
         throw "navigator.ml.createContext returned null";
     }
     console.log("new MLGraphBuilder(mlContext);");
-    graphBuilder = new MLGraphBuilder(mlContext);
+    let graphBuilder = new MLGraphBuilder(mlContext);
     if (graphBuilder == null)
     {
         console.log("navigator.ml.createContext returned null");
@@ -2542,70 +2537,70 @@ void ConvertOnnxToWebNNJavascript(
 }
 )";
 
-    char const* footer = R"(
-// Footer
-/*
-// 3. Bind inputs to the graph and execute for the result.
-const bufferA = new Float32Array([0,1,2,3]);
-const bufferB = new Float32Array([2,2,2,2]);
-bufferC = new Float32Array(4).fill(99); // Fill with sentinel values.
-
-const inputs = {'A': bufferA, 'B': bufferB};
-const outputs = {'C': bufferC};
-await mlContext.compute(graph, inputs, outputs);
-
-let element = document.getElementById(domElementName);
-var message = "";
-for (const [tensorName, tensorBuffer] of Object.entries(tensorDictionary))
+char const* webnnBuildModelFunctionHeaderString = R"(
+export async function BuildModel(mlGraphBuilder /*MLGraphBuilder*/)
 {
-    var line = tensorName + ": " + tensorBuffer.constructor.name + "[" + tensorBuffer.length + "] = {" + tensorBuffer + "}, " + tensorBuffer.byteLength + " bytes";
-    console.log(domElementName + " " + line);
-    message += line + "<br/>";
-}
-element.innerHTML = message;
-*/
 )";
 
-    char const* modelFunctionHeader = R"(
-function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder*/)
-{
-    //--const ATensorDesc = {type: 'float32', dimensions: [2, 2]};
-    //--const BTensorDesc = {type: 'float32', dimensions: [1]};
-    //--//const constantDesc = { type: 'float32', dimensions: [1] };
-    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
-    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
-
-    //--const A = graphBuilder.input('A', ATensorDesc);
-    //--const B = graphBuilder.input('B', BTensorDesc);
-    //--const C = graphBuilder.add(A, B);
-)";
-
-    char const* modelFunctionFooter = R"(
+char const* webnnBuildModelFunctionFooterString = R"(
 } // BuildModel
 )";
 
-    /*
-    //--char const* inputsOutputsComment = "\n// Graph input/output tensors\n";
-    //--char const* constantTensorsComment = "\n// Constant tensors\n";
-    //--char const* edgesComment = "\n// Edges\n";
-    //--char const* operatorsComment = "\n// Operators\n";
-    //--char const* operatorNodeStyle =     R"(node [style="filled, rounded", color=black, fillcolor="#E0E0F0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=1, margin="0.02, 0.02" ];)" "\n";
-    //--char const* inputOutputNodeStyle =  R"(node [style=filled, color=black, fillcolor="#C0F0C0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
-    //--char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
-    //--char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
-    */
+char const* webnnComputeModelFunctionHeaderString = R"(
+export async function ComputeModel( // TODO: Append model name so multiple distinct models can be imported by caller.
+    mlContext /*MLContext*/,
+    graph /*MLGraph*/,
+)";
 
-    auto nodes = onnxGraph.node();
+char const* webnnComputeModelFunctionFooterString = R"(
+} // ComputeModel
+)";
+
+char const* webnnPrintTensorsFunctionString = R"(
+export function PrintTensors(domElementName, tensorDictionary)
+{
+    let element = document.getElementById(domElementName);
+    var message = "";
+    for (const [tensorName, tensorBuffer] of Object.entries(tensorDictionary))
+    {
+        var line = tensorName + ": " + tensorBuffer.constructor.name + "[" + tensorBuffer.length + "] = {" + tensorBuffer + "}, " + tensorBuffer.byteLength + " bytes";
+        //console.log(domElementName + " " + line);
+        message += line + "<br/>";
+    }
+    element.innerHTML = message;
+} // PrintTensors
+)";
+
+enum class OperatorType
+{
+    Unknown,
+    Relu,
+    Add,
+};
+
+void ConvertOnnxToWebNNJavascript(
+    onnx::ModelProto const& model,
+    std::ofstream& outputFile
+)
+{
+    std::map<std::u8string, uint32_t> freeDimensionMap; // TODO: Pass in as parameter.
+    const onnx::GraphProto& onnxGraph = model.graph();
+
+    auto const& nodes = onnxGraph.node();
     std::vector<std::u8string> sanitizedNodeNames;
     sanitizedNodeNames.reserve(nodes.size());
     std::set<std::u8string, std::less<>> constantTensors;
     std::vector<std::u8string_view> constantTensorsInOrder;
 
-    outputFile << header;
-    outputFile << modelFunctionHeader;
+    outputFile << webnnCreateContextFunctionString;
+    outputFile << webnnBuildModelFunctionHeaderString;
 
-    // Gather the list of constant tensors defined with static weights inside the graph.
-    outputFile << "\n    ////////////////////////////////////////\n    // Constants:\n";
+    // Gather the list of constant tensors defined with static weights inside the graph. e.g.:
+    //
+    //  const constantTensorDesc = {type: 'float32', dimensions: [2, 2]};
+    //  const constant = graphBuilder.constant(constantTensorDesc, new Float32Array(concatenatedTensorData, 0, 32));
+
+    outputFile << "    ////////////////////////////////////////\n    // Constants:\n";
     uint64_t totalConstantBufferSize = 0;
 
     for (const onnx::TensorProto& tensorProto : onnxGraph.initializer())
@@ -2637,17 +2632,18 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
             ;
     }
 
-    // Write input/output tensors.
-    //--outputFile << inputsOutputsComment;
-    //--outputFile << inputOutputNodeStyle;
-
     // Write inputs, excluding any constant tensors. Newer ONNX models do not have this issue,
     // as they only declare true inputs, but some old models defined all constant tensors as
     // graph inputs too, which confuses later logic when trying to bind tensors to inputs
     // (e.g. opset 9 squeezenet).
+    //
+    // e.g.:
+    //  const dataTensorDesc = {type: float32, dimensions: [1,3,224,224]};
+    //  const data = graphBuilder.input('data', dataTensorDesc);
+
     outputFile << "\n    ////////////////////////////////////////\n    // Inputs:\n";
 
-    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.input())
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
     {
         std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
         if (constantTensors.contains(unsanitizedName))
@@ -2698,7 +2694,6 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
                 );
             }
         }
-        //--uint32_t tensorByteSize = GetByteSizeFromDimensions(dimensions, dataType);
 
         std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
 
@@ -2709,12 +2704,13 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
     }
 
     outputFile << "\n    ////////////////////////////////////////\n    // Outputs:\n";
-    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.output())
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
     {
         outputFile << "    // " << EscapeToJavascriptIdentifier(valueInfo.name()) << '\n';
+        // TODO: Write output dimensions.
     }
 
-    bool showConstantTensors = false;
+    //--bool showConstantTensors = false;
     //--if (showConstantTensors)
     //--{
     //--    // Write constant tensors.
@@ -2751,8 +2747,6 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
     //--}
 
     // Write operator nodes.
-    //--outputFile << operatorsComment;
-    //--outputFile << operatorNodeStyle;
 
     // Enumerate all nodes, converting from ONNX operators to WebNN.
     outputFile << "\n    ////////////////////////////////////////\n    // Operators:\n";
@@ -2763,28 +2757,130 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
         const std::u8string& operatorTypeName = ToUtf8Char(node.op_type());
 
         std::u8string sanitizedNodeName;
-        if (nodeName.empty())
+        // If no name, then just use current node index for a unique name.
+        sanitizedNodeName = nodeName.empty() ? ToUtf8Char(std::to_string(nodeIndex)) : EscapeToJavascriptIdentifier(nodeName);
+
+        OperatorType operatorType = OperatorType::Unknown;
+        // TODO: Change to be generic.
+        if (operatorTypeName == u8"Relu")
         {
-            // Just use current node index for unique name.
-            sanitizedNodeName = ToUtf8Char(std::to_string(nodeIndex));
+            operatorType = OperatorType::Relu;
         }
-        else
+        else if (operatorTypeName == u8"Add")
         {
-            sanitizedNodeName = EscapeToJavascriptIdentifier(nodeName);
+            operatorType = OperatorType::Add;
         }
 
-        //--outputFile << ToChar(sanitizedNodeName) << " [label=" << ToChar(EscapeToJavascriptIdentifier(operatorTypeName)) << "]\n";
-        outputFile << "    const " << ToChar(sanitizedNodeName)
-                   << " = graphBuilder." <<  ToChar(operatorTypeName)
-                   << "();\n"
-                   ; // TODO: Remap this from ONNX to WebNN.
+        switch (operatorType)
+        {
+        case OperatorType::Relu:
+            outputFile << "    const " << ToChar(sanitizedNodeName)
+                << " = graphBuilder.relu(" << EscapeToJavascriptIdentifier(node.input(0)) << ");\n"
+                ;
+            break;
+        case OperatorType::Add:
+            outputFile << "    const " << ToChar(sanitizedNodeName)
+                << " = graphBuilder.add(" << EscapeToJavascriptIdentifier(node.input(0)) << ", " << EscapeToJavascriptIdentifier(node.input(1)) << ");\n"
+                ;
+            break;
+        default:
+            outputFile << "    const " << ToChar(sanitizedNodeName)
+                << " = graphBuilder." <<  ToChar(operatorTypeName)
+                << "();\n"
+                ; // TODO: Remap this from ONNX to WebNN more generically.
+            break;
+        }
         sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
     }
 
-    // Write all edges.
-    //--outputFile << edgesComment;
-    //--outputFile << intermediateNodeStyle;
+    outputFile << webnnBuildModelFunctionFooterString;
 
+    // Write all input/output buffers for compute method.
+    // TODO:
+
+#if 1
+    // Fill in compute model function.
+    // e.g.:
+    //
+    // const bufferA = new Float32Array([0,1,2,3]);
+    // const bufferB = new Float32Array([2,2,2,2]);
+    // bufferC = new Float32Array(4).fill(99); // Fill with sentinel values.
+    //
+    // const inputs = {'A': bufferA, 'B': bufferB};
+    // const outputs = {'C': bufferC};
+
+    outputFile << webnnComputeModelFunctionHeaderString;
+
+    // Fill in all parameters...
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
+    {
+        // TODO: Change to bool array rather than keep calling contains.
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    bufferA, // new Float32Array([0,1,2,3])\n";
+    }
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    bufferC, // new Float32Array(42)\n";
+    }
+    outputFile << ")\n{\n";
+
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    // const bufferA = new Float32Array([0,1,2,3]);\n";
+    }
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    // const bufferC = new Float32Array(42);\n";
+    }
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    // const inputs = {'A': bufferA, 'B': bufferB};\n";
+    }
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    const outputs = {'C': bufferC};\n";
+    }
+
+    outputFile << "    mlContext.compute(graph, inputs, outputs);\n";
+    outputFile << webnnComputeModelFunctionFooterString;
+#endif
+
+#if 0
     auto writeEdge = [&](std::u8string_view sanitizedNodeName, std::u8string_view tensorName, bool isInput) -> void
     {
         if (!showConstantTensors && constantTensors.contains(tensorName))
@@ -2819,9 +2915,9 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
             writeEdge(sanitizedNodeName, ToUtf8Char(tensorName), /*isInput*/ false);
         }
     }
+#endif
 
-    outputFile << modelFunctionFooter;
-    outputFile << footer;
+    outputFile << webnnPrintTensorsFunctionString;
 }
 
 #if 0
