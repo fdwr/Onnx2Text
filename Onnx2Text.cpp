@@ -83,12 +83,15 @@ inline char const* ToChar(char8_t const* const p) { return reinterpret_cast<char
 inline char** ToChar(char8_t** p) { return reinterpret_cast<char**>(p); }
 inline char* const* ToChar(char8_t* const* const p) { return reinterpret_cast<char* const* const>(p); }
 inline char const* const* ToChar(char8_t const* const* const p) { return reinterpret_cast<char const* const* const>(p); }
+inline std::string const& ToChar(std::u8string const& s) { return reinterpret_cast<std::string const&>(s); }
 inline unsigned char* ToUChar(char* p) { return reinterpret_cast<unsigned char*>(p); }
 inline unsigned char* ToUChar(char8_t* p) { return reinterpret_cast<unsigned char*>(p); }
 inline unsigned char* ToUChar(std::byte* p) { return reinterpret_cast<unsigned char*>(p); }
 inline char8_t* ToUtf8Char(char* p) { return reinterpret_cast<char8_t*>(p); }
 inline std::u8string_view ToUtf8Char(std::string_view s) { return std::u8string_view(reinterpret_cast<char8_t const*>(s.data()), s.size()); }
 inline std::string_view ToChar(std::u8string_view s) { return std::string_view(reinterpret_cast<char const*>(s.data()), s.size()); }
+inline std::u8string& ToUtf8Char(std::string& s) { return reinterpret_cast<std::u8string&>(s); }
+inline std::u8string const& ToUtf8Char(std::string const& s) { return reinterpret_cast<std::u8string const&>(s); }
 
 std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> g_converterToUtf8;
 
@@ -488,6 +491,7 @@ enum class FileType
     OnnxTensor,          // .onnxtensor
     TensorGenerator,     // generator:
     GraphVizDot,         // .dot
+    WebNNJavascript,     // .webnn.js
 };
 
 size_t GetFileExtensionOffset(std::wstring_view filename)
@@ -504,31 +508,30 @@ struct Mapping
 };
 const static Mapping fileTypeMappings[] =
 {
-    { L"pb", FileType::GoogleProtobuf },
-    { L"onnx", FileType::OnnxModel },
-    { L"txt" , FileType::Text },
-    { L"prototxt" , FileType::Text },
-    { L"csv" , FileType::CommaSeparatedValue },
-    { L"dat" , FileType::RawData },
-    { L"bin" , FileType::RawData },
-    { L"bmp" , FileType::Image },
-    { L"png" , FileType::Image },
-    { L"jpg" , FileType::Image },
-    { L"jpeg", FileType::Image },
-    { L"npy" , FileType::NumPyArray },
-    { L"onnxtensor", FileType::OnnxTensor },
-    { L"tensorproto", FileType::OnnxTensor },
-    { L"dot", FileType::GraphVizDot },
+    { L".pb", FileType::GoogleProtobuf },
+    { L".onnx", FileType::OnnxModel },
+    { L".txt" , FileType::Text },
+    { L".prototxt" , FileType::Text },
+    { L".csv" , FileType::CommaSeparatedValue },
+    { L".dat" , FileType::RawData },
+    { L".bin" , FileType::RawData },
+    { L".bmp" , FileType::Image },
+    { L".png" , FileType::Image },
+    { L".jpg" , FileType::Image },
+    { L".jpeg", FileType::Image },
+    { L".npy" , FileType::NumPyArray },
+    { L".onnxtensor", FileType::OnnxTensor },
+    { L".tensorproto", FileType::OnnxTensor },
+    { L".dot", FileType::GraphVizDot },
+    { L".webnn.js", FileType::WebNNJavascript},
 };
 
 FileType GetFileType(std::wstring_view filename)
 {
-    size_t extensionOffset = GetFileExtensionOffset(filename);
-    std::wstring_view filenameExtension = filename.substr(extensionOffset);
     if (starts_with(filename, std::wstring_view(L"generate("))) return FileType::TensorGenerator;
     for (auto& mapping : fileTypeMappings)
     {
-        if (filenameExtension == mapping.filenameExtension)
+        if (filename.ends_with(mapping.filenameExtension))
         {
             return mapping.fileType;
         }
@@ -1056,6 +1059,11 @@ uint32_t ComputeElementCount(span<int32_t const> dimensions)
     return std::accumulate(dimensions.begin(), dimensions.end(), 1, std::multiplies<int32_t>());
 }
 
+uint64_t ComputeElementCount64(span<int64_t const> dimensions)
+{
+    return std::accumulate(dimensions.begin(), dimensions.end(), int64_t(1), std::multiplies<int64_t>());
+}
+
 constexpr size_t ElementDataTypeTotal = onnx::TensorProto_DataType::TensorProto_DataType_BFLOAT16 + 1;
 
 struct StringAndIndex
@@ -1186,6 +1194,11 @@ uint32_t GetByteSizeFromDataType(onnx::TensorProto::DataType dataType) noexcept
 uint32_t GetByteSizeFromDimensions(span<int32_t const> dimensions, onnx::TensorProto::DataType dataType) noexcept
 {
     return ComputeElementCount(dimensions) * GetByteSizeFromDataType(dataType);
+}
+
+uint64_t GetByteSizeFromDimensions64(span<int64_t const> dimensions, onnx::TensorProto::DataType dataType) noexcept
+{
+    return ComputeElementCount64(dimensions) * GetByteSizeFromDataType(dataType);
 }
 
 onnx::TensorProto::DataType GetDataTypeFromStringName(std::u8string_view name) noexcept
@@ -2381,6 +2394,678 @@ outputorder=edgesfirst;
     outputFile << footer;
 }
 
+// Fills the entire buffer up to fixed size, including leading zeroes.
+void WriteZeroPaddedHexNum(uint32_t value, /*out*/ span<char8_t> text)
+{
+    // Convert character to digits.
+    while (!text.empty())
+    {
+        char8_t digit = value & 0xF;
+        digit += (digit >= 10) ? 'A' - 10 : '0';
+        text.back() = digit;
+        text.pop_back();
+        value >>= 4;
+    }
+}
+
+std::u8string EscapeToJavascriptIdentifier(std::u8string_view originalText)
+{
+    constexpr size_t escapePrefixLength = 1; // \u or \U
+    char8_t escapedSequence[3] = { '$','0','0'};
+
+    std::u8string escapedText;
+    escapedText.clear();
+    escapedText.reserve(originalText.size() * std::size(escapedSequence));
+    span<char8_t> shortDigitRange(&escapedSequence[escapePrefixLength], &escapedSequence[escapePrefixLength + escapePrefixLength]);
+
+    for (size_t i = 0, count = originalText.size(); i < count; ++i)
+    {
+        char8_t ch = originalText[i];
+        WriteZeroPaddedHexNum(ch, /*out*/ shortDigitRange);
+
+        if ((ch >= 'A' && ch <= 'Z') // Alphabetic
+        ||  (ch >= 'a' && ch <= 'z') // Alphabetic
+        ||  (ch >= '0' && ch <= '9' && i > 0) // Number after first character
+        ||   ch == '_' // Underscore
+        ||   ch >= 128) // UTF-8 fragment
+        {
+            escapedText.push_back(ch);
+        }
+        else
+        {
+            escapedText.insert(escapedText.size(), escapedSequence, std::size(escapedSequence));
+        }
+    }
+    return escapedText;
+}
+
+std::string EscapeToJavascriptIdentifier(std::string_view originalText)
+{
+    return ToChar(EscapeToJavascriptIdentifier(ToUtf8Char(originalText)));
+}
+
+std::u8string GetWebNNTensorDesc(
+    onnx::TensorProto::DataType dataType,
+    span<int64_t const> dimensions
+)
+{
+    std::u8string dimensionsString;
+    std::u8string_view dataTypeName = GetStringNameFromDataType(dataType);
+    std::u8string output;
+
+    WriteCsv(
+        as_bytes(dimensions),
+        onnx::TensorProto::DataType::TensorProto_DataType_INT64,
+        /*shouldPrintRawBytes*/ false,
+        /*out*/ dimensionsString
+    );
+
+    output.append(u8"{");
+    output.append(u8"type: ");
+    output.append(dataTypeName);
+    output.append(u8", ");
+    output.append(u8"dimensions: [");
+    output.append(dimensionsString);
+    output.append(u8"]}");
+    return output;
+}
+
+std::u8string GetWebNNArrayBufferDefinition(
+    onnx::TensorProto::DataType dataType,
+    uint64_t tensorByteOffset,
+    uint64_t tensorByteSize
+)
+{
+    std::u8string output;
+    std::u8string_view dataTypeName = GetStringNameFromDataType(dataType);
+    output.append(dataTypeName);
+    output[0] = char8_t(toupper(output[0]));
+
+    output.append(u8"Array(");
+    output.append(u8"concatenatedConstantBuffer, ");
+    output.append(ToUtf8Char(std::to_string(tensorByteOffset)));
+    output.append(u8", ");
+    output.append(ToUtf8Char(std::to_string(tensorByteSize)));
+    output.append(u8")");
+    return output;
+}
+
+std::u8string GetWebNNTensorDescDefinition(
+    std::u8string_view sanitizedName,
+    onnx::TensorProto::DataType dataType,
+    span<int64_t const> dimensions
+)
+{
+    std::u8string dimensionsString;
+    std::u8string_view dataTypeName = GetStringNameFromDataType(dataType);
+    std::u8string output;
+
+    output.append(u8"const ");
+    output.append(sanitizedName);
+    output.append(u8"TensorDesc = ");
+    output.append(GetWebNNTensorDesc(dataType, dimensions));
+    output.append(u8";\n");
+    return output;
+}
+
+void ConvertOnnxToWebNNJavascript(
+    onnx::ModelProto const& model,
+    std::ofstream& outputFile
+)
+{
+    std::map<std::u8string, uint32_t> freeDimensionMap; // TODO: Pass in as parameter.
+    const onnx::GraphProto& onnxGraph = model.graph();
+
+    char const* header =
+        R"(async function CreateMlContextAndBuilder()
+{
+    if (typeof MLGraphBuilder !== 'undefined')
+    {
+        console.log("MLGraphBuilder is not defined");
+        return;
+    }
+    console.log("navigator.ml.createContext(...);");
+    mlContext = await navigator.ml.createContext({devicePreference: 'gpu'});
+    if (mlContext == null)
+    {
+        console.log("navigator.ml.createContext returned null");
+        throw "navigator.ml.createContext returned null";
+    }
+    console.log("new MLGraphBuilder(mlContext);");
+    graphBuilder = new MLGraphBuilder(mlContext);
+    if (graphBuilder == null)
+    {
+        console.log("navigator.ml.createContext returned null");
+        throw "navigator.ml.createContext returned null";
+    }
+    return [mlContext, mlGraphBuilder];
+}
+)";
+
+    char const* footer = R"(
+// Footer
+/*
+// 3. Bind inputs to the graph and execute for the result.
+const bufferA = new Float32Array([0,1,2,3]);
+const bufferB = new Float32Array([2,2,2,2]);
+bufferC = new Float32Array(4).fill(99); // Fill with sentinel values.
+
+const inputs = {'A': bufferA, 'B': bufferB};
+const outputs = {'C': bufferC};
+await mlContext.compute(graph, inputs, outputs);
+
+let element = document.getElementById(domElementName);
+var message = "";
+for (const [tensorName, tensorBuffer] of Object.entries(tensorDictionary))
+{
+    var line = tensorName + ": " + tensorBuffer.constructor.name + "[" + tensorBuffer.length + "] = {" + tensorBuffer + "}, " + tensorBuffer.byteLength + " bytes";
+    console.log(domElementName + " " + line);
+    message += line + "<br/>";
+}
+element.innerHTML = message;
+*/
+)";
+
+    char const* modelFunctionHeader = R"(
+function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder*/)
+{
+    //--const ATensorDesc = {type: 'float32', dimensions: [2, 2]};
+    //--const BTensorDesc = {type: 'float32', dimensions: [1]};
+    //--//const constantDesc = { type: 'float32', dimensions: [1] };
+    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
+    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
+
+    //--const A = graphBuilder.input('A', ATensorDesc);
+    //--const B = graphBuilder.input('B', BTensorDesc);
+    //--const C = graphBuilder.add(A, B);
+)";
+
+    char const* modelFunctionFooter = R"(
+} // BuildModel
+)";
+
+    /*
+    //--char const* inputsOutputsComment = "\n// Graph input/output tensors\n";
+    //--char const* constantTensorsComment = "\n// Constant tensors\n";
+    //--char const* edgesComment = "\n// Edges\n";
+    //--char const* operatorsComment = "\n// Operators\n";
+    //--char const* operatorNodeStyle =     R"(node [style="filled, rounded", color=black, fillcolor="#E0E0F0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=1, margin="0.02, 0.02" ];)" "\n";
+    //--char const* inputOutputNodeStyle =  R"(node [style=filled, color=black, fillcolor="#C0F0C0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
+    //--char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
+    //--char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
+    */
+
+    auto nodes = onnxGraph.node();
+    std::vector<std::u8string> sanitizedNodeNames;
+    sanitizedNodeNames.reserve(nodes.size());
+    std::set<std::u8string, std::less<>> constantTensors;
+    std::vector<std::u8string_view> constantTensorsInOrder;
+
+    outputFile << header;
+    outputFile << modelFunctionHeader;
+
+    // Gather the list of constant tensors defined with static weights inside the graph.
+    outputFile << "\n    ////////////////////////////////////////\n    // Constants:\n";
+    uint64_t totalConstantBufferSize = 0;
+
+    for (const onnx::TensorProto& tensorProto : onnxGraph.initializer())
+    {
+        // Write out a single constant. e.g.
+        //
+        // const someNameTensorDesc = {type: 'float32', dimensions: [2, 2]};
+        // const someName = graphBuilder.constant(someNameDesc, new Float32Array([44.0]));
+        //
+        std::u8string const& unsanitizedName = ToUtf8Char(tensorProto.name());
+        constantTensors.insert(unsanitizedName);
+        std::u8string sanitizedName = EscapeToJavascriptIdentifier(unsanitizedName);
+
+        onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(tensorProto.data_type());
+        std::vector<int64_t> dimensions(tensorProto.dims().begin(), tensorProto.dims().end());
+        uint64_t tensorByteSize = GetByteSizeFromDimensions64(dimensions, dataType);
+        if (totalConstantBufferSize + tensorByteSize < totalConstantBufferSize)
+        {
+            printf("Warning: Exceeded 4G tensor byte size at tensor '%s'. The model will likely fail to execute.\n", ToChar(unsanitizedName).c_str());
+        }
+
+        std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
+        std::u8string arrayBufferString = GetWebNNArrayBufferDefinition(dataType, totalConstantBufferSize, tensorByteSize);
+
+        totalConstantBufferSize += tensorByteSize;
+        outputFile
+            << "    " << ToChar(tensorDescString)
+            << "    const " << ToChar(sanitizedName) << " = graphBuilder.constant(" << ToChar(sanitizedName) << "TensorDesc, " << ToChar(arrayBufferString) << ");\n"
+            ;
+    }
+
+    // Write input/output tensors.
+    //--outputFile << inputsOutputsComment;
+    //--outputFile << inputOutputNodeStyle;
+
+    // Write inputs, excluding any constant tensors. Newer ONNX models do not have this issue,
+    // as they only declare true inputs, but some old models defined all constant tensors as
+    // graph inputs too, which confuses later logic when trying to bind tensors to inputs
+    // (e.g. opset 9 squeezenet).
+    outputFile << "\n    ////////////////////////////////////////\n    // Inputs:\n";
+
+    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.input())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+        if (valueInfo.type().value_case() != onnx::TypeProto::ValueCase::kTensorType)
+        {
+            printf("Input '%s' has an unknown graph input type (expected tensor)\n", ToChar(unsanitizedName.c_str()));
+            continue; // Skip unknown inputs. (the model will likely fail to run though)
+        }
+
+        std::u8string sanitizedName = EscapeToJavascriptIdentifier(unsanitizedName);
+        onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(valueInfo.type().tensor_type().elem_type());
+        auto shape = valueInfo.type().tensor_type().shape();
+        std::vector<int64_t> dimensions;
+
+        // Append each dimension.
+        for (auto& dim : shape.dim())
+        {
+            if (dim.has_dim_value())
+            {
+                dimensions.push_back(dim.dim_value());
+            }
+            else if (dim.has_dim_param())
+            {
+                auto& dimParam = ToUtf8Char(dim.dim_param());
+                int64_t dimensionSize = 1u;
+                if (auto it = freeDimensionMap.find(dimParam); it != freeDimensionMap.end())
+                {
+                    dimensionSize = it->second;
+                }
+                else
+                {
+                    printf(
+                        "Warning: Input '%s' has unknown free dimension (%s). Setting size to 1.\n",
+                        ToChar(unsanitizedName).c_str(),
+                        dim.dim_param().c_str()
+                    );
+                }
+                dimensions.push_back(1u);
+            }
+            else
+            {
+                printf(
+                    "Warning: Input '%s' has unknown dimension type. Setting size to 1.\n",
+                    ToChar(unsanitizedName.c_str())
+                );
+            }
+        }
+        //--uint32_t tensorByteSize = GetByteSizeFromDimensions(dimensions, dataType);
+
+        std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
+
+        outputFile
+            << "    " << ToChar(tensorDescString)
+            << "    const " << ToChar(sanitizedName) << " = graphBuilder.input('" << ToChar(unsanitizedName) << "', " << ToChar(sanitizedName) << "TensorDesc);\n"
+            ;
+    }
+
+    outputFile << "\n    ////////////////////////////////////////\n    // Outputs:\n";
+    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.output())
+    {
+        outputFile << "    // " << EscapeToJavascriptIdentifier(valueInfo.name()) << '\n';
+    }
+
+    bool showConstantTensors = false;
+    //--if (showConstantTensors)
+    //--{
+    //--    // Write constant tensors.
+    //--    //--outputFile << constantTensorsComment;
+    //--    //--outputFile << constantNodeStyle;
+    //--
+    //--    // Enumerate them in node binding order rather than the arbitrary order they are listed in the model
+    //--    // or in alphabetic order, since node binding order is more intuitive when looking at the graph
+    //--    // since the inputs follow the ONNX order.
+    //--    constantTensorsInOrder.reserve(constantTensors.size());
+    //--    for (const onnx::NodeProto& node : nodes)
+    //--    {
+    //--        for (std::string const& tensorName : node.input())
+    //--        {
+    //--            if (constantTensors.contains(ToUtf8Char(tensorName)))
+    //--            {
+    //--                constantTensorsInOrder.push_back(ToUtf8Char(tensorName));
+    //--            }
+    //--        }
+    //--        for (std::string const& tensorName : node.output())
+    //--        {
+    //--            if (constantTensors.contains(ToUtf8Char(tensorName)))
+    //--            {
+    //--                constantTensorsInOrder.push_back(ToUtf8Char(tensorName));
+    //--            }
+    //--        }
+    //--    }
+    //--
+    //--    for (auto& name : constantTensorsInOrder)
+    //--    {
+    //--        outputFile << ToChar(EscapeToJavascriptIdentifier(name));
+    //--        outputFile << '\n';
+    //--    }
+    //--}
+
+    // Write operator nodes.
+    //--outputFile << operatorsComment;
+    //--outputFile << operatorNodeStyle;
+
+    // Enumerate all nodes, converting from ONNX operators to WebNN.
+    outputFile << "\n    ////////////////////////////////////////\n    // Operators:\n";
+    for (int nodeIndex = 0, nodeCount = nodes.size(); nodeIndex < nodeCount; ++nodeIndex)
+    {
+        const onnx::NodeProto& node = nodes[nodeIndex];
+        const std::u8string& nodeName = ToUtf8Char(node.name());
+        const std::u8string& operatorTypeName = ToUtf8Char(node.op_type());
+
+        std::u8string sanitizedNodeName;
+        if (nodeName.empty())
+        {
+            // Just use current node index for unique name.
+            sanitizedNodeName = ToUtf8Char(std::to_string(nodeIndex));
+        }
+        else
+        {
+            sanitizedNodeName = EscapeToJavascriptIdentifier(nodeName);
+        }
+
+        //--outputFile << ToChar(sanitizedNodeName) << " [label=" << ToChar(EscapeToJavascriptIdentifier(operatorTypeName)) << "]\n";
+        outputFile << "    const " << ToChar(sanitizedNodeName)
+                   << " = graphBuilder." <<  ToChar(operatorTypeName)
+                   << "();\n"
+                   ; // TODO: Remap this from ONNX to WebNN.
+        sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
+    }
+
+    // Write all edges.
+    //--outputFile << edgesComment;
+    //--outputFile << intermediateNodeStyle;
+
+    auto writeEdge = [&](std::u8string_view sanitizedNodeName, std::u8string_view tensorName, bool isInput) -> void
+    {
+        if (!showConstantTensors && constantTensors.contains(tensorName))
+        {
+            return; // Don't show constant tensors, which can be noisy.
+        }
+        auto sanitizedTensorName = EscapeToJavascriptIdentifier(tensorName);
+
+        // Change the edge direction depending on whether input or output edge.
+        std::u8string_view first = sanitizedNodeName;
+        std::u8string_view second = sanitizedTensorName;
+        if (isInput)
+        {
+            std::swap(first, second);
+        }
+
+        // Print the edge. If input edge to operator, then avoid the arrowhead.
+        //--outputFile << ToChar(first) << " -> " << ToChar(second) << (isInput ? " [arrowhead=normal]" : " [arrowhead=none]") << "\n";
+    };
+
+    for (int nodeIndex = 0, nodeCount = nodes.size(); nodeIndex < nodeCount; ++nodeIndex)
+    {
+        const onnx::NodeProto& node = nodes[nodeIndex];
+        std::u8string_view sanitizedNodeName = sanitizedNodeNames[nodeIndex];
+
+        for (const std::string& tensorName : node.input())
+        {
+            writeEdge(sanitizedNodeName, ToUtf8Char(tensorName), /*isInput*/ true);
+        }
+        for (const std::string& tensorName : node.output())
+        {
+            writeEdge(sanitizedNodeName, ToUtf8Char(tensorName), /*isInput*/ false);
+        }
+    }
+
+    outputFile << modelFunctionFooter;
+    outputFile << footer;
+}
+
+#if 0
+
+// Converts from ONNX to WebNN calls.
+/*
+
+e.g. Convert MaxPool from ONNX: 
+
+Constant inputs (attributes)
+- auto_pad : string (default is NOTSET). auto_pad must be either NOTSET, SAME_UPPER, SAME_LOWER or VALID. Where default value is NOTSET, which means explicit padding is used. SAME_UPPER or SAME_LOWER mean pad the input so that `output_shape[i] = ceil(input_shape[i] / strides[i])` for each axis `i`. The padding is split between the two sides equally or almost equally (depending on whether it is even or odd). In case the padding is an odd number, the extra padding is added at the end for SAME_UPPER and at the beginning for SAME_LOWER.
+- ceil_mode : int (default is 0). Whether to use ceil or floor (default) to compute the output shape.
+- dilations : list of ints. Dilation value along each spatial axis of filter. If not present, the dilation defaults to 1 along each spatial axis.
+- kernel_shape : list of ints (required). The size of the kernel along each axis.
+- pads : list of ints. Padding for the beginning and ending along each spatial axis, it can take any value greater than or equal to 0. The value represent the number of pixels added to the beginning and end part of the corresponding axis. `pads` format should be as follow [x1_begin, x2_begin...x1_end, x2_end,...], where xi_begin the number of pixels added at the beginning of axis `i` and xi_end, the number of pixels added at the end of axis `i`. This attribute cannot be used simultaneously with auto_pad attribute. If not present, the padding defaults to 0 along start and end of each spatial axis.
+- storage_order : int (default is 0). The storage order of the tensor. 0 is row major, and 1 is column major. This attribute is used only to convert an n-tuple index value into a single integer value for producing the second output.
+- strides : list of ints. Stride along each spatial axis. If not present, the stride defaults to 1 along each spatial axis.
+Inputs:
+- X (differentiable) : T. Input data tensor from the previous operator; dimensions for image case are (N x C x H x W), where N is the batch size, C is the number of channels, and H and W are the height and the width of the data. For non image case, the dimensions are in the form of (N x C x D1 x D2 ... Dn), where N is the batch size. Optionally, if dimension denotation is in effect, the operation expects the input data tensor to arrive with the dimension denotation of [DATA_BATCH, DATA_CHANNEL, DATA_FEATURE, DATA_FEATURE ...].
+Outputs (1 - 2):
+- Y (differentiable) : T. Output data tensor from average or max pooling across the input tensor. Dimensions will vary based on various kernel, stride, and pad sizes. Floor value of the dimension is used
+- Indices (optional, non-differentiable) : I. Indices tensor from max pooling across the input tensor. The dimensions of indices are the same as output tensor. The values in indices of are the indices of the selected values during pooling. The indices are computed as flatten 1-D tensor, and the indices do not consider padding. So the values in indices are in [0, N x C x D1 x ... x Dn).
+Type Constraints:
+- T : tensor(float16), tensor(float), tensor(double), tensor(int8), tensor(uint8). Constrain input and output types to float and 8 bit tensors.
+- I : tensor(int64). Constrain index tensor to int64
+
+To WebNN:
+
+dictionary MLPool2dOptions {
+sequence<unsigned long> windowDimensions;
+sequence<unsigned long> padding;
+sequence<unsigned long> strides;
+sequence<unsigned long> dilations;
+MLAutoPad autoPad = "explicit";
+MLInputOperandLayout layout = "nchw";
+MLRoundingType roundingType = "floor";
+sequence<unsigned long> outputSizes;
+};
+
+partial interface MLGraphBuilder {
+MLOperand averagePool2d(MLOperand input, optional MLPool2dOptions options = {});
+MLOperand l2Pool2d(MLOperand input, optional MLPool2dOptions options = {});
+MLOperand maxPool2d(MLOperand input, optional MLPool2dOptions options = {});
+};
+
+Resnet operators:
+Add x 16
+BatchNormalization x 51
+Conv x 53
+Gemm x 1
+GlobalAveragePool x 1
+MaxPool x 1
+Relu x 50
+Reshape x 1
+*/
+
+enum class OperatorType
+{
+    Add,
+    Cast,
+    Concat,
+    Conv,
+    Cos,
+    Div,
+    Erf,
+    Expand,
+    Gemm,
+    InstanceNormalization,
+    MatMul,
+    Mul,
+    Pow,
+    ReduceMean,
+    Relu,
+    Reshape,
+    Resize,
+    Sigmoid,
+    Sin,
+    Slice,
+    Softmax,
+    Sqrt,
+    Sub,
+    Transpose,
+    Unsqueeze,
+};
+
+struct NameIndexMapping
+{
+    std::string_view name;
+    uint32_t index;
+};
+
+NameIndexMapping onnxOperatorMapping[] =
+{
+    {"Add", OperatorType::Add},
+    {"Cast", OperatorType::Cast},
+    {"Concat", OperatorType::Concat},
+    {"Conv", OperatorType::Conv},
+    {"Cos", OperatorType::Cos},
+    {"Div", OperatorType::Div},
+    {"Erf", OperatorType::Erf},
+    {"Expand", OperatorType::Expand},
+    {"Gemm", OperatorType::Gemm},
+    {"InstanceNormalization", OperatorType::InstanceNormalization},
+    {"MatMul", OperatorType::MatMul},
+    {"Mul", OperatorType::Mul},
+    {"Pow", OperatorType::Pow},
+    {"ReduceMean", OperatorType::ReduceMean},
+    {"Relu", OperatorType::Relu},
+    {"Reshape", OperatorType::Reshape},
+    {"Resize", OperatorType::Resize},
+    {"Sigmoid", OperatorType::Sigmoid},
+    {"Sin", OperatorType::Sin},
+    {"Slice", OperatorType::Slice},
+    {"Softmax", OperatorType::Softmax},
+    {"Sqrt", OperatorType::Sqrt},
+    {"Sub", OperatorType::Sub},
+    {"Transpose", OperatorType::Transpose},
+    {"Unsqueeze", OperatorType::Unsqueeze},
+};
+
+struct TensorCollectionInformation
+{
+
+};
+
+auto binaryElementwiseOperatorMappingsOnnx =
+{
+    {InputType::Input,  0, "A", "a"},
+    {InputType::Input,  1, "B", "b"},
+    {InputType::Output, 0, "C", "c"},
+};
+
+auto castOperatorMappingsOnnx =
+{
+    {InputType::Input,  0, "input", "input"},
+    {InputType::Output, 0, "output", "output"},
+    {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
+};
+
+auto binaryElementwiseOperatorMappingsWebnn =
+{
+    {InputType::Input,  0, "A", "a"},
+    {InputType::Input,  1, "B", "b"},
+    {InputType::Output, 0, "C", "c"},
+};
+
+auto castOperatorMappingsWebnn =
+{
+    {InputType::Input,  0, "input", "input"},
+    {InputType::OutputReturned, 0, "output", "output"},
+    {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
+};
+
+{OperatorType::Add, "add", binaryElementwiseOperatorMappings},
+{OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
+{OperatorType::Cast, "cast", castOperatorMappings},
+
+std::string EncodeNodeName(std::string_view nodeName)
+{
+    return EncodePercentEncodedString(nodeName, '$'); 
+}
+
+void WriteWebnnOperator(std::string_view nodeName)
+{
+    auto encodedNodeName = EncodeNodeName(nodeName);
+    std::string optionsString = "key: 42, anotherKey: 'float32'";
+    if (!optionsString.empty())
+    {
+        print("var {}Options = \{{}\};", encodedNodeName, optionsString);
+    }
+    print("var {} = graphBuilder.{}(X, Y, {}Options);", encodedNodeName, operatorName, encodedNodeName);
+    // Append each parameter.
+}
+
+void WriteTensorInputs()
+{
+    auto encodedNodeName = EncodeNodeName(nodeName);
+    std::print("const constantDesc = { type: 'float32', dimensions: [1] };");
+    std::print("const constant = graphBuilder.constant({}Desc, new Float32Array([44.0]));");
+    std::print("const A = graphBuilder.input('A', inputTensorDesc);");
+
+}
+
+#if 0
+
+const inputTensorDesc = {type: 'float32', dimensions: [2, 2]};
+const constantDesc = { type: 'float32', dimensions: [1] };
+const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
+
+const A = graphBuilder.input('A', inputTensorDesc);
+const B = graphBuilder.input('B', inputTensorDesc);
+const C = graphBuilder.add(graphBuilder.mul(A, B), constant);
+LogTensorShapes(graphBuilder, {"A": A, "B": B, "C": C})
+
+// 2. Build the graph into an executable.
+const graph = await graphBuilder.build({'C': C});
+//console.log("do things2");
+
+// 3. Bind inputs to the graph and execute for the result.
+const bufferA = new Float32Array([0,1,2,3]);
+const bufferB = new Float32Array([2,2,2,2]);
+bufferC = new Float32Array(4).fill(99); // Fill with sentinel values.
+
+const inputs = {'A': bufferA, 'B': bufferB};
+const outputs = {'C': bufferC};
+await mlContext.compute(graph, inputs, outputs);
+
+#endif
+
+switch (operatorType)
+{
+case OperatorType::Cast:
+    WriteWebnnOperator(operatorType, onnxOps, tensorCollectionInformation);
+    break;
+case OperatorType::Add:
+case OperatorType::Concat:
+case OperatorType::Conv:
+case OperatorType::Cos:
+case OperatorType::Div:
+case OperatorType::Erf:
+case OperatorType::Expand:
+case OperatorType::Gemm:
+case OperatorType::InstanceNormalization:
+case OperatorType::MatMul:
+case OperatorType::Mul:
+case OperatorType::Pow:
+case OperatorType::ReduceMean:
+case OperatorType::Relu:
+case OperatorType::Reshape:
+case OperatorType::Resize:
+case OperatorType::Sigmoid:
+case OperatorType::Sin:
+case OperatorType::Slice:
+case OperatorType::Softmax:
+case OperatorType::Sqrt:
+case OperatorType::Sub:
+case OperatorType::Transpose:
+case OperatorType::Unsqueeze:
+    WriteWebnnOperator(operatorType, onnxOps, tensorCollectionInformation);
+    break;
+}
+
+#endif
+
 void LoadModel(
     _In_z_ wchar_t const* inputFilename,
     bool shouldZeroModelValues,
@@ -2463,7 +3148,6 @@ void StoreModel(
           || outputFileType == FileType::RawData)
     {
         // enumerate all the tensor initializers, and dump their contents.
-
         std::wstring initialFileName(outputFilename);
         std::wstring currentFileName(outputFilename);
         size_t substitutionOffset = initialFileName.find('*', 0); // Find wildcard in filename mask.
@@ -2552,6 +3236,12 @@ void StoreModel(
         succeeded = true;
 
     }
+    else if (outputFileType == FileType::WebNNJavascript)
+    {
+        std::ofstream outputFile(outputFilename, std::ios::out);
+        ConvertOnnxToWebNNJavascript(model, outputFile);
+        succeeded = true;
+    }
     else if (outputFileType != FileType::Unknown)
     {
         throw std::invalid_argument("File type is not supported for output.");
@@ -2565,6 +3255,8 @@ void StoreModel(
     {
         throw std::ios::failure("Could not serialize output graph file.");
     }
+
+    printf("Converted model file successfully.\n");
 }
 
 #ifdef _WIN32
@@ -3417,6 +4109,9 @@ void PrintUsage()
                  "        Onnx2Text input.onnx output.dot\n"
                  "        dot.exe output.dot -Tsvg -O   (or -Tpng)\n"
                  "\n"
+                 "    Convert to WebNN javascript (very minimal experiment):\n"
+                 "        Onnx2Text input.onnx output.webnn.js\n"
+                 "\n"
                  "    Zero weights in ONNX binary protobuf:\n"
                  "        Onnx2Text -zeromodelvalues input.onnx output.onnx\n"
                  "\n"
@@ -3459,7 +4154,8 @@ void PrintUsage()
                  "    Model file types:\n"
                  "        .onnx - Open Neural Exchange model protobuf\n"
                  "        .pb - Google Protobuf (with -graph)\n"
-                 "        .txt/.prototxt - Protobuf text\n"
+                 "        .dot - GraphViz dot file (output only)\n"
+                 "        .webnn.js - WebNN Javascript (output only)\n"
                  "    Tensor file types:\n"
                  "        .onnxtensor - Open Neural Exchange tensor\n"
                  "        .pb - Google Protobuf (with -tensor)\n"
@@ -3523,6 +4219,7 @@ ConversionMode GetConversionModeFromFileType(FileType fileType)
     case FileType::NumPyArray: return ConversionMode::Tensor;
     case FileType::TensorGenerator: return ConversionMode::Tensor;
     case FileType::GraphVizDot: return ConversionMode::Graph;
+    case FileType::WebNNJavascript: return ConversionMode::Graph;
     }
     return ConversionMode::Unknown;
 }
