@@ -2487,6 +2487,7 @@ std::u8string GetWebNNArrayTypeName(onnx::TensorProto::DataType dataType)
     return capitalizedDataTypeName;
 }
 
+// e.g. Float32Buffer(constantBuffer, 0, 8192) // byte offset and byte count
 std::u8string GetWebNNArrayBufferDefinition(
     onnx::TensorProto::DataType dataType,
     uint64_t tensorByteOffset,
@@ -2638,12 +2639,109 @@ export function PrintTensors(domElementName, tensorDictionary)
 } // PrintTensors
 )";
 
-enum class OperatorType
+namespace // To avoid winioctl.h name collision with poorly named _MEDIA_TYPE Unknown leaking out.
+{
+
+enum OperatorType : uint32_t
 {
     Unknown,
-    Relu,
     Add,
+    Cast,
+    Concat,
+    Conv,
+    Cos,
+    Div,
+    Erf,
+    Expand,
+    Gemm,
+    InstanceNormalization,
+    MatMul,
+    Mul,
+    Pow,
+    ReduceMean,
+    Relu,
+    Reshape,
+    Resize,
+    Sigmoid,
+    Sin,
+    Slice,
+    Softmax,
+    Sqrt,
+    Sub,
+    Transpose,
+    Unsqueeze,
 };
+
+} // namespace
+
+namespace OnnxConversion
+{
+    StringAndIndex operatorMapping[] =
+    {
+        {u8"Add", OperatorType::Add},
+        {u8"Cast", OperatorType::Cast},
+        {u8"Concat", OperatorType::Concat},
+        {u8"Conv", OperatorType::Conv},
+        {u8"Cos", OperatorType::Cos},
+        {u8"Div", OperatorType::Div},
+        {u8"Erf", OperatorType::Erf},
+        {u8"Expand", OperatorType::Expand},
+        {u8"Gemm", OperatorType::Gemm},
+        {u8"InstanceNormalization", OperatorType::InstanceNormalization},
+        {u8"MatMul", OperatorType::MatMul},
+        {u8"Mul", OperatorType::Mul},
+        {u8"Pow", OperatorType::Pow},
+        {u8"ReduceMean", OperatorType::ReduceMean},
+        {u8"Relu", OperatorType::Relu},
+        {u8"Reshape", OperatorType::Reshape},
+        {u8"Resize", OperatorType::Resize},
+        {u8"Sigmoid", OperatorType::Sigmoid},
+        {u8"Sin", OperatorType::Sin},
+        {u8"Slice", OperatorType::Slice},
+        {u8"Softmax", OperatorType::Softmax},
+        {u8"Sqrt", OperatorType::Sqrt},
+        {u8"Sub", OperatorType::Sub},
+        {u8"Transpose", OperatorType::Transpose},
+        {u8"Unsqueeze", OperatorType::Unsqueeze},
+    };
+
+#if 0
+    auto binaryElementwiseOperatorMappingsOnnx =
+    {
+        {InputType::Input,  0, "A", "a"},
+        {InputType::Input,  1, "B", "b"},
+        {InputType::Output, 0, "C", "c"},
+    };
+
+    auto castOperatorMappingsOnnx =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::Output, 0, "output", "output"},
+        {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
+    };
+
+    auto binaryElementwiseOperatorMappingsWebnn =
+    {
+        {InputType::Input,  0, "A", "a"},
+        {InputType::Input,  1, "B", "b"},
+        {InputType::Output, 0, "C", "c"},
+    };
+
+    auto castOperatorMappingsWebnn =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::OutputReturned, 0, "output", "output"},
+        {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
+    };
+
+    {OperatorType::Add, "add", binaryElementwiseOperatorMappings},
+    {OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
+    {OperatorType::Cast, "cast", castOperatorMappings},
+#endif
+}
+
+
+
 
 void ConvertOnnxToWebNNJavascript(
     onnx::ModelProto const& model,
@@ -2676,7 +2774,7 @@ void ConvertOnnxToWebNNJavascript(
     // Gather the list of constant tensors defined with static weights inside the graph. e.g.:
     //
     //  const constantTensorDesc = {type: 'float32', dimensions: [2, 2]};
-    //  const constant = graphBuilder.constant(constantTensorDesc, new Float32Array(concatenatedTensorData, 0, 32));
+    //  const constant = graphBuilder.constant(constantTensorDesc, new Float32Array(constantBuffer, 0, 32));
 
     outputFile << "    ////////////////////////////////////////\n    // Constants:\n"
                   "\n"
@@ -2687,6 +2785,7 @@ void ConvertOnnxToWebNNJavascript(
                   "\n";
 
     uint64_t totalConstantBufferSize = 0;
+    std::vector<std::byte> constantBuffer;
 
     for (const onnx::TensorProto& tensorProto : onnxGraph.initializer())
     {
@@ -2708,6 +2807,9 @@ void ConvertOnnxToWebNNJavascript(
         // e.g. Float32Array(concatenatedConstantBuffer, 6912, 256)
         std::u8string arrayBufferString = GetWebNNArrayBufferDefinition(dataType, totalConstantBufferSize, tensorByteSize);
 
+        std::vector<std::byte> tensorByteData = GetOnnxTensorRawByteData(tensorProto);
+        constantBuffer.insert(constantBuffer.end(), tensorByteData.begin(), tensorByteData.end());
+
         if (totalConstantBufferSize + tensorByteSize < totalConstantBufferSize)
         {
             printf("Warning: Exceeded 4G tensor byte size at tensor '%s'. The model will likely fail to execute.\n", ToChar(unsanitizedName).c_str());
@@ -2717,6 +2819,13 @@ void ConvertOnnxToWebNNJavascript(
             << "    " << tensorDescString
             << "    const " << sanitizedName << " = graphBuilder.constant(" << sanitizedName << "TensorDesc, " << arrayBufferString << ");\n"
             ;
+    }
+
+    // Write the constant data as one large concatenated file.
+    // The graphBuilder.constant() calls have the offsets.
+    {
+        std::ofstream constantDataOutputFile(constantDataFilename, std::ios::out);
+        constantDataOutputFile.write(reinterpret_cast<char const*>(constantBuffer.data()), constantBuffer.size());
     }
 
     // Keep track of which inputs are valid dynamic inputs.
@@ -2791,7 +2900,7 @@ void ConvertOnnxToWebNNJavascript(
             continue;
         }
 
-        onnx::ValueInfoProto const& valueInfo = onnxGraph.input(outputIndex);
+        onnx::ValueInfoProto const& valueInfo = onnxGraph.output(outputIndex);
         auto [sanitizedName, dataType, dimensions] = GetOnnxValueInfoProperties(valueInfo, freeDimensionMap);
         std::u8string tensorDescString = GetWebNNTensorDesc(dataType, dimensions);
 
@@ -3069,106 +3178,12 @@ Relu x 50
 Reshape x 1
 */
 
-enum class OperatorType
-{
-    Add,
-    Cast,
-    Concat,
-    Conv,
-    Cos,
-    Div,
-    Erf,
-    Expand,
-    Gemm,
-    InstanceNormalization,
-    MatMul,
-    Mul,
-    Pow,
-    ReduceMean,
-    Relu,
-    Reshape,
-    Resize,
-    Sigmoid,
-    Sin,
-    Slice,
-    Softmax,
-    Sqrt,
-    Sub,
-    Transpose,
-    Unsqueeze,
-};
-
-struct NameIndexMapping
-{
-    std::string_view name;
-    uint32_t index;
-};
-
-NameIndexMapping onnxOperatorMapping[] =
-{
-    {"Add", OperatorType::Add},
-    {"Cast", OperatorType::Cast},
-    {"Concat", OperatorType::Concat},
-    {"Conv", OperatorType::Conv},
-    {"Cos", OperatorType::Cos},
-    {"Div", OperatorType::Div},
-    {"Erf", OperatorType::Erf},
-    {"Expand", OperatorType::Expand},
-    {"Gemm", OperatorType::Gemm},
-    {"InstanceNormalization", OperatorType::InstanceNormalization},
-    {"MatMul", OperatorType::MatMul},
-    {"Mul", OperatorType::Mul},
-    {"Pow", OperatorType::Pow},
-    {"ReduceMean", OperatorType::ReduceMean},
-    {"Relu", OperatorType::Relu},
-    {"Reshape", OperatorType::Reshape},
-    {"Resize", OperatorType::Resize},
-    {"Sigmoid", OperatorType::Sigmoid},
-    {"Sin", OperatorType::Sin},
-    {"Slice", OperatorType::Slice},
-    {"Softmax", OperatorType::Softmax},
-    {"Sqrt", OperatorType::Sqrt},
-    {"Sub", OperatorType::Sub},
-    {"Transpose", OperatorType::Transpose},
-    {"Unsqueeze", OperatorType::Unsqueeze},
-};
 
 struct TensorCollectionInformation
 {
 
 };
 
-auto binaryElementwiseOperatorMappingsOnnx =
-{
-    {InputType::Input,  0, "A", "a"},
-    {InputType::Input,  1, "B", "b"},
-    {InputType::Output, 0, "C", "c"},
-};
-
-auto castOperatorMappingsOnnx =
-{
-    {InputType::Input,  0, "input", "input"},
-    {InputType::Output, 0, "output", "output"},
-    {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
-};
-
-auto binaryElementwiseOperatorMappingsWebnn =
-{
-    {InputType::Input,  0, "A", "a"},
-    {InputType::Input,  1, "B", "b"},
-    {InputType::Output, 0, "C", "c"},
-};
-
-auto castOperatorMappingsWebnn =
-{
-    {InputType::Input,  0, "input", "input"},
-    {InputType::OutputReturned, 0, "output", "output"},
-    {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
-};
-
-{OperatorType::Add, "add", binaryElementwiseOperatorMappings},
-{OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
-{OperatorType::Cast, "cast", castOperatorMappings},
 
 std::string EncodeNodeName(std::string_view nodeName)
 {
@@ -3196,7 +3211,7 @@ void WriteTensorInputs()
 
 }
 
-#if 0
+#if 0 // TODO:::
 
 const inputTensorDesc = {type: 'float32', dimensions: [2, 2]};
 const constantDesc = { type: 'float32', dimensions: [1] };
