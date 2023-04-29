@@ -2674,6 +2674,76 @@ enum OperatorType : uint32_t
 
 } // namespace
 
+namespace WebNNConversion
+{
+    struct OperatorMapping
+    {
+        char8_t const* name; // Null terminated.
+        uint32_t version;
+        OperatorType operatorType;
+    };
+
+    OperatorMapping operatorMapping[] =
+    {
+        {u8"add", 0, OperatorType::Add},
+        {u8"cast", 0, OperatorType::Cast},
+        {u8"concat", 0, OperatorType::Concat},
+        {u8"conv", 0, OperatorType::Conv},
+        {u8"cos", 0, OperatorType::Cos},
+        {u8"div", 0, OperatorType::Div},
+        {u8"erf", 0, OperatorType::Erf},
+        {u8"expand", 0, OperatorType::Expand},
+        {u8"gemm", 0, OperatorType::Gemm},
+        {u8"instanceNormalization", 0, OperatorType::InstanceNormalization},
+        {u8"matMul", 0, OperatorType::MatMul},
+        {u8"mul", 0, OperatorType::Mul},
+        {u8"pow", 0, OperatorType::Pow},
+        {u8"reduceMean", 0, OperatorType::ReduceMean},
+        {u8"relu", 0, OperatorType::Relu},
+        {u8"reshape", 0, OperatorType::Reshape},
+        {u8"resize", 0, OperatorType::Resize},
+        {u8"sigmoid", 0, OperatorType::Sigmoid},
+        {u8"sin", 0, OperatorType::Sin},
+        {u8"slice", 0, OperatorType::Slice},
+        {u8"softmax", 0, OperatorType::Softmax},
+        {u8"sqrt", 0, OperatorType::Sqrt},
+        {u8"sub", 0, OperatorType::Sub},
+        {u8"transpose", 0, OperatorType::Transpose},
+        {u8"unsqueeze", 0, OperatorType::Unsqueeze},
+    };
+
+#if 0
+    struct OperandMapping
+    {
+        char8_t const* name; // Null terminated.
+    };
+
+    auto operatorMappingsCast =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::Output, 0, "output", "output"},
+        {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
+    };
+
+    auto operatorMappingsElementwiseBinary =
+    {
+        {InputType::Input,  0, "A", "a"},
+        {InputType::Input,  1, "B", "b"},
+        {InputType::Output, 0, "C", "c"},
+    };
+
+    auto operatorMappingsCast =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::OutputReturned, 0, "output", "output"},
+        {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
+    };
+
+    {OperatorType::Add, "add", binaryElementwiseOperatorMappings},
+    {OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
+    {OperatorType::Cast, "cast", castOperatorMappings},
+#endif
+}
 namespace OnnxConversion
 {
     StringAndIndex operatorMapping[] =
@@ -2706,32 +2776,18 @@ namespace OnnxConversion
     };
 
 #if 0
-    auto binaryElementwiseOperatorMappingsOnnx =
+    auto operatorMappingsElementwiseBinary =
     {
         {InputType::Input,  0, "A", "a"},
         {InputType::Input,  1, "B", "b"},
         {InputType::Output, 0, "C", "c"},
     };
 
-    auto castOperatorMappingsOnnx =
+    auto operatorMappingsCast =
     {
         {InputType::Input,  0, "input", "input"},
         {InputType::Output, 0, "output", "output"},
         {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
-    };
-
-    auto binaryElementwiseOperatorMappingsWebnn =
-    {
-        {InputType::Input,  0, "A", "a"},
-        {InputType::Input,  1, "B", "b"},
-        {InputType::Output, 0, "C", "c"},
-    };
-
-    auto castOperatorMappingsWebnn =
-    {
-        {InputType::Input,  0, "input", "input"},
-        {InputType::OutputReturned, 0, "output", "output"},
-        {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
     };
 
     {OperatorType::Add, "add", binaryElementwiseOperatorMappings},
