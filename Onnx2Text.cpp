@@ -2194,6 +2194,12 @@ void DisplayModelInformation(onnx::ModelProto const& model)
         graphProto.node_size()
     );
 
+    printf("Operator set domains:\n");
+    for (const onnx::OperatorSetIdProto& opset : model.opset_import())
+    {
+        printf("  Domain: \"%s\", Version: %llu\n", opset.domain().c_str(), opset.version());
+    }
+
     printf("Inputs:\n");
     PrintTensorInfo(u8"  ", graphProto.input());
 
