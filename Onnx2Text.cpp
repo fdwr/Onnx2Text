@@ -2148,6 +2148,55 @@ void ZeroModelTensorWeights(onnx::ModelProto& model)
     }
 }
 
+std::u8string GetDimensionsStringFromProtobufShape(onnx::TensorShapeProto const& tensorShape)
+{
+    std::u8string returnString;
+    for (onnx::TensorShapeProto_Dimension const& v : tensorShape.dim())
+    {
+        if (!returnString.empty())
+        {
+            returnString.append(u8", ");
+        }
+        if (v.has_dim_value())
+        {
+            returnString.append(ToUtf8Char(std::to_string(v.dim_value())));
+        }
+        else if (v.has_dim_param())
+        {
+            returnString.append(ToUtf8Char(v.dim_param()));
+        }
+    }
+
+    return returnString;
+}
+
+void PrintTensorInfo(std::u8string_view prefix, google::protobuf::RepeatedPtrField<onnx::ValueInfoProto> io)
+{
+    std::vector<int32_t> dimensions;
+
+    for (const onnx::ValueInfoProto& ioValue : io)
+    {
+        if (!ioValue.has_type())
+            continue;
+
+        onnx::TypeProto const& ioValueType = ioValue.type();
+        if (!ioValueType.has_tensor_type())
+            continue;
+
+        onnx::TypeProto_Tensor const& onnxTensor = ioValueType.tensor_type();
+        onnx::TensorProto::DataType elementDataType = onnx::TensorProto::DataType(onnxTensor.elem_type());
+        std::u8string dimensionsText = GetDimensionsStringFromProtobufShape(onnxTensor.shape());
+
+        printf(
+            "%s%s %s[%s]\n",
+            ToChar(prefix.data()),
+            ToChar(GetStringNameFromDataType(elementDataType).data()),
+            ioValue.name().c_str(),
+            ToChar(dimensionsText.c_str())
+        );
+    }
+}
+
 void DisplayModelInformation(onnx::ModelProto const& model)
 {
     onnx::GraphProto const& graphProto = model.graph();
@@ -2157,6 +2206,18 @@ void DisplayModelInformation(onnx::ModelProto const& model)
         ,
         graphProto.node_size()
     );
+
+    printf("Operator set domains:\n");
+    for (const onnx::OperatorSetIdProto& opset : model.opset_import())
+    {
+        printf("  Domain: \"%s\", Version: %llu\n", opset.domain().c_str(), opset.version());
+    }
+
+    printf("Inputs:\n");
+    PrintTensorInfo(u8"  ", graphProto.input());
+
+    printf("Outputs:\n");
+    PrintTensorInfo(u8"  ", graphProto.output());
 
     // Collect all unique operator names.
     std::map<std::string, uint32_t> operatorTypeCounts;
