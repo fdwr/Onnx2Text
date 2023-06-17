@@ -93,6 +93,13 @@ inline std::string_view ToChar(std::u8string_view s) { return std::string_view(r
 inline std::u8string& ToUtf8Char(std::string& s) { return reinterpret_cast<std::u8string&>(s); }
 inline std::u8string const& ToUtf8Char(std::string const& s) { return reinterpret_cast<std::u8string const&>(s); }
 
+// Fix C++'s flaw where std::u8string doesn't work with std::cout.
+std::ostream& operator<<(std::ostream& outputStream, std::u8string const& s)
+{
+    outputStream << ToChar(s);
+    return outputStream;
+}
+
 std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> g_converterToUtf8;
 
 inline std::u8string ToUtf8String(std::wstring_view source)
@@ -137,10 +144,9 @@ using Microsoft::WRL::ComPtr;
 
 void ThrowBadHResultRuntimeErrorWithMessage(HRESULT hr)
 {
-    std::string result;
     std::stringstream stream;
     stream << "Failing HRESULT: 0x" << std::hex << hr;
-    stream.str(/*out*/ result);
+    std::string result = std::move(stream.str());
     throw std::runtime_error(result.c_str());
 }
 
@@ -255,6 +261,18 @@ span<std::byte> struct_as_bytes(T const& data)
 requires (!std::is_const_v<decltype(data)>)
 {
     return span<std::byte>(reinterpret_cast<const std::byte*>(std::addressof(data)), sizeof(data));
+}
+
+template<typename ContiguousContainerType, typename IterableRange>
+void assign_range(ContiguousContainerType& container, IterableRange const& range)
+{
+    container.assign(range.begin(), range.end());
+}
+
+template<typename ContiguousContainerType, typename IterableRange>
+void append_range(ContiguousContainerType& container, IterableRange const& range)
+{
+    container.append(range.begin(), range.end());
 }
 
 template<typename T>
@@ -2314,7 +2332,7 @@ outputorder=edgesfirst;
     char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
     char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
 
-    auto nodes = onnxGraph.node();
+    auto const& nodes = onnxGraph.node();
     std::vector<std::string> sanitizedNodeNames;
     sanitizedNodeNames.reserve(nodes.size());
     std::set<std::string, std::less<>> constantTensors;
@@ -2505,6 +2523,7 @@ std::string EscapeToJavascriptIdentifier(std::string_view originalText)
     return ToChar(EscapeToJavascriptIdentifier(ToUtf8Char(originalText)));
 }
 
+// e.g. {type: "float32", dimensions: [64,3,3,3]}
 std::u8string GetWebNNTensorDesc(
     onnx::TensorProto::DataType dataType,
     span<int64_t const> dimensions
@@ -2522,28 +2541,34 @@ std::u8string GetWebNNTensorDesc(
     );
 
     output.append(u8"{");
-    output.append(u8"type: ");
+    output.append(u8"type: \"");
     output.append(dataTypeName);
-    output.append(u8", ");
+    output.append(u8"\", ");
     output.append(u8"dimensions: [");
     output.append(dimensionsString);
     output.append(u8"]}");
     return output;
 }
 
+// e.g. Float32Array
+std::u8string GetWebNNArrayTypeName(onnx::TensorProto::DataType dataType)
+{
+    std::u8string capitalizedDataTypeName(GetStringNameFromDataType(dataType));
+    capitalizedDataTypeName[0] = char8_t(toupper(capitalizedDataTypeName[0]));
+    capitalizedDataTypeName.append(u8"Array");
+    return capitalizedDataTypeName;
+}
+
+// e.g. Float32Buffer(constantBuffer, 0, 8192) // byte offset and byte count
 std::u8string GetWebNNArrayBufferDefinition(
     onnx::TensorProto::DataType dataType,
     uint64_t tensorByteOffset,
     uint64_t tensorByteSize
 )
 {
-    std::u8string output;
-    std::u8string_view dataTypeName = GetStringNameFromDataType(dataType);
-    output.append(dataTypeName);
-    output[0] = char8_t(toupper(output[0]));
-
-    output.append(u8"Array(");
-    output.append(u8"concatenatedConstantBuffer, ");
+    std::u8string output = GetWebNNArrayTypeName(dataType);
+    output.append(u8"(");
+    output.append(u8"constantBuffer, ");
     output.append(ToUtf8Char(std::to_string(tensorByteOffset)));
     output.append(u8", ");
     output.append(ToUtf8Char(std::to_string(tensorByteSize)));
@@ -2551,6 +2576,7 @@ std::u8string GetWebNNArrayBufferDefinition(
     return output;
 }
 
+// e.g. const squeezenet0_conv0_weightTensorDesc = {type: "float32", dimensions: [64,3,3,3]};
 std::u8string GetWebNNTensorDescDefinition(
     std::u8string_view sanitizedName,
     onnx::TensorProto::DataType dataType,
@@ -2569,16 +2595,60 @@ std::u8string GetWebNNTensorDescDefinition(
     return output;
 }
 
-void ConvertOnnxToWebNNJavascript(
-    onnx::ModelProto const& model,
-    std::ofstream& outputFile
-)
+// Get the sanitized name, data type, and dimensions.
+std::tuple<std::u8string, onnx::TensorProto::DataType, std::vector<int64_t>> GetOnnxValueInfoProperties(
+    onnx::ValueInfoProto const& valueInfo,
+    std::map<std::u8string, uint32_t>& freeDimensionMap
+    )
 {
-    std::map<std::u8string, uint32_t> freeDimensionMap; // TODO: Pass in as parameter.
-    const onnx::GraphProto& onnxGraph = model.graph();
+    std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+    std::u8string sanitizedName = EscapeToJavascriptIdentifier(unsanitizedName);
+    onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(valueInfo.type().tensor_type().elem_type());
+    auto shape = valueInfo.type().tensor_type().shape();
+    std::vector<int64_t> dimensions;
 
-    char const* header =
-        R"(async function CreateMlContextAndBuilder()
+    // Append each dimension.
+    for (auto& dim : shape.dim())
+    {
+        if (dim.has_dim_value())
+        {
+            dimensions.push_back(dim.dim_value());
+        }
+        else if (dim.has_dim_param())
+        {
+            auto& dimParam = ToUtf8Char(dim.dim_param());
+            int64_t dimensionSize = 1u;
+            if (auto it = freeDimensionMap.find(dimParam); it != freeDimensionMap.end())
+            {
+                dimensionSize = it->second;
+            }
+            else
+            {
+                printf(
+                    "Warning: Edge '%s' has an unknown free dimension (%s). Setting size to 1.\n",
+                    ToChar(unsanitizedName).c_str(),
+                    dim.dim_param().c_str()
+                );
+            }
+            dimensions.push_back(1u);
+        }
+        else
+        {
+            printf(
+                "Warning: Edge '%s' has an unknown dimension type. Setting size to 1.\n",
+                ToChar(unsanitizedName.c_str())
+            );
+        }
+    }
+
+    return {std::move(sanitizedName), std::move(dataType), std::move(dimensions)};
+}
+
+// TODO: Add comment
+// import {CreateMlContextAndBuilder} from "./convertedModel.webnn.js";
+
+char const* webnnCreateContextFunctionString =
+R"(export async function CreateMlContextAndBuilder()
 {
     if (typeof MLGraphBuilder !== 'undefined')
     {
@@ -2586,14 +2656,14 @@ void ConvertOnnxToWebNNJavascript(
         return;
     }
     console.log("navigator.ml.createContext(...);");
-    mlContext = await navigator.ml.createContext({devicePreference: 'gpu'});
+    let mlContext = await navigator.ml.createContext({devicePreference: 'gpu'});
     if (mlContext == null)
     {
         console.log("navigator.ml.createContext returned null");
         throw "navigator.ml.createContext returned null";
     }
     console.log("new MLGraphBuilder(mlContext);");
-    graphBuilder = new MLGraphBuilder(mlContext);
+    let graphBuilder = new MLGraphBuilder(mlContext);
     if (graphBuilder == null)
     {
         console.log("navigator.ml.createContext returned null");
@@ -2603,71 +2673,841 @@ void ConvertOnnxToWebNNJavascript(
 }
 )";
 
-    char const* footer = R"(
-// Footer
-/*
-// 3. Bind inputs to the graph and execute for the result.
-const bufferA = new Float32Array([0,1,2,3]);
-const bufferB = new Float32Array([2,2,2,2]);
-bufferC = new Float32Array(4).fill(99); // Fill with sentinel values.
-
-const inputs = {'A': bufferA, 'B': bufferB};
-const outputs = {'C': bufferC};
-await mlContext.compute(graph, inputs, outputs);
-
-let element = document.getElementById(domElementName);
-var message = "";
-for (const [tensorName, tensorBuffer] of Object.entries(tensorDictionary))
+char const* webnnBuildModelFunctionHeaderString = R"(
+export async function BuildModel(mlGraphBuilder /*MLGraphBuilder*/)
 {
-    var line = tensorName + ": " + tensorBuffer.constructor.name + "[" + tensorBuffer.length + "] = {" + tensorBuffer + "}, " + tensorBuffer.byteLength + " bytes";
-    console.log(domElementName + " " + line);
-    message += line + "<br/>";
-}
-element.innerHTML = message;
-*/
 )";
 
-    char const* modelFunctionHeader = R"(
-function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder*/)
-{
-    //--const ATensorDesc = {type: 'float32', dimensions: [2, 2]};
-    //--const BTensorDesc = {type: 'float32', dimensions: [1]};
-    //--//const constantDesc = { type: 'float32', dimensions: [1] };
-    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
-    //--//const constant = graphBuilder.constant(constantDesc, new Float32Array([44.0]));
+char const* webnnBuildModelFunctionFooterString = R"(
+    // Build the graph into an executable.
+    const graph = await graphBuilder.build({'output': output});
+    return graph;
 
-    //--const A = graphBuilder.input('A', ATensorDesc);
-    //--const B = graphBuilder.input('B', BTensorDesc);
-    //--const C = graphBuilder.add(A, B);
-)";
-
-    char const* modelFunctionFooter = R"(
 } // BuildModel
 )";
 
-    /*
-    //--char const* inputsOutputsComment = "\n// Graph input/output tensors\n";
-    //--char const* constantTensorsComment = "\n// Constant tensors\n";
-    //--char const* edgesComment = "\n// Edges\n";
-    //--char const* operatorsComment = "\n// Operators\n";
-    //--char const* operatorNodeStyle =     R"(node [style="filled, rounded", color=black, fillcolor="#E0E0F0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=1, margin="0.02, 0.02" ];)" "\n";
-    //--char const* inputOutputNodeStyle =  R"(node [style=filled, color=black, fillcolor="#C0F0C0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
-    //--char const* constantNodeStyle =     R"(node [style=filled, color=black, fillcolor="#D0E0D0FF", penwidth=1, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.04, 0.04" ];)" "\n";
-    //--char const* intermediateNodeStyle = R"(node [color=transparent, fillcolor="#00000000", penwidth=0, shape=rectangle, fontname="Segoe UI", fontsize=9, height=.2, width=0.8, margin="0.01, 0.01" ];)" "\n";
-    */
+char const* webnnComputeModelFunctionHeaderString = R"(
+export async function ComputeModel( // TODO: Append model name so multiple distinct models can be imported by caller.
+    mlContext, // MLContext
+    graph, // MLGraph
+)";
 
-    auto nodes = onnxGraph.node();
-    std::vector<std::u8string> sanitizedNodeNames;
-    sanitizedNodeNames.reserve(nodes.size());
+char const* webnnComputeModelFunctionFooterString = R"(
+} // ComputeModel
+)";
+
+char const* webnnPrintTensorsFunctionString = R"(
+export function PrintTensors(domElementName, tensorDictionary)
+{
+    let element = document.getElementById(domElementName);
+    var message = "";
+    for (const [tensorName, tensorBuffer] of Object.entries(tensorDictionary))
+    {
+        var line = tensorName + ": " + tensorBuffer.constructor.name + "[" + tensorBuffer.length + "] = {" + tensorBuffer + "}, " + tensorBuffer.byteLength + " bytes";
+        //console.log(domElementName + " " + line);
+        message += line + "<br/>";
+    }
+    element.innerHTML = message;
+} // PrintTensors
+)";
+
+// Wrap in namespace wrapper.
+// A normal C++ enum is laughably broken, spilling its enumerant guts into the outer scope.
+// Then enum class is also laughably broken, gimping all utility of using enums as indices.
+// So the next best compromise is a normal enum wrapped by a namespace (but not
+// anonymous).
+namespace OperatorTypeScope
+{
+enum OperatorType : uint8_t
+{
+    Unknown,
+    Absolute,
+    Add,
+    BatchAndSpatialNormalization, // Normalize both batch and spatial dimensions. Errantly called "BatchNormalization".
+    Cast,
+    Ceiling,
+    Concatenate,
+    Convolution,
+    Cosine,
+    Divide,
+    Erf,
+    Expand,
+    Exponential,
+    Floor,
+    Gemm,
+    SpatialNormalization, // Normalize spatial channels (not batch and channel). Also called "InstanceNormalization".
+    Logarithm,
+    MatMul,
+    Maximum,
+    MeanVarianceNormalization, // Normalize gives axes.
+    Minimum,
+    Multiply,
+    Negate,
+    Power,
+    ReduceMean,
+    Relu,
+    Reshape,
+    Resample,
+    Sigmoid,
+    Sine,
+    Slice,
+    Softmax,
+    SquareRoot,
+    Subtract,
+    Tangent,
+    Transpose,
+    Unsqueeze,
+};
+}
+
+// Broader category and kind of semantics.
+namespace OperatorFieldKindScope
+{
+enum OperatorFieldKind : uint8_t
+{
+    Unknown         = 0x00000000,
+    Input           = 0x00000001, // e.g. ONNX input
+    Output          = 0x00000002, // e.g. ONNX output
+    Constant        = 0x00000004, // e.g. ONNX "attribute" which is really a constant input
+    Parameter       = 0x00000010, // e.g. WebNN parameter call
+    SeparateOption  = 0x00000020, // e.g. WebNN options dictionary
+
+    InputParameter      = Input | Parameter,
+    InputSeparateOption = Input | SeparateOption,
+    ConstantInput       = Input | Constant,
+};
+}
+
+namespace OperatorFieldTypeScope
+{
+// More specific type. A tensor could be a parameter or an option.
+enum OperatorFieldType : uint8_t
+{
+    Unknown,
+    TensorName,
+    StringEnum,
+    Scalar,
+    Operator, // Refer to another entire operator (causing a mini-subgraph)
+    List,   // 1D array
+};
+}
+
+namespace ElementDataTypeScope
+{
+enum class ElementDataType : uint8_t
+{
+    Unknown,
+    Float8f2e5s1,
+    Float8f3e4s1,
+    Float16,
+    Float16f7e8s1,
+    Float32,
+    Float64,
+    Float128,
+    Float256,
+    Uint1,
+    Uint2,
+    Uint4,
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+    Uint128,
+    Uint256,
+    Int1,
+    Int2,
+    Int4,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    Int256,
+    Bool8,
+    Char8, // UTF-8 string (1D array of char's)
+    Char16, // UTF-16 string (1D array of char16's)
+    Char32, // UTF-32 string (1D array of char32's)
+    Total,
+};
+}
+
+enum BinaryOperatorFields : uint8_t
+{
+    A, // Input
+    B, // Output
+    C, // Output
+};
+
+using OperatorTypeScope::OperatorType;
+using OperatorFieldKindScope::OperatorFieldKind;
+using OperatorFieldTypeScope::OperatorFieldType;
+using ElementDataTypeScope::ElementDataType;
+
+struct FieldValue
+{
+    ElementDataType elementDataType = ElementDataType::Unknown;
+    std::vector<std::byte> data;
+};
+
+struct FieldMapping
+{
+    char8_t const* name = nullptr; // Null terminated.
+    OperatorFieldKind kind = OperatorFieldKind::Unknown;
+    OperatorFieldType type = OperatorFieldType::Unknown;
+    uint8_t index = 0; // Field index in source (e.g. ONNX input #2 is the 3rd input). 0 for purely named attributes.
+    uint8_t canonicalIndex = 0; // Index in the canonical representation (the target index to write into).
+};
+
+struct OperatorMapping
+{
+    char8_t const* name; // Null terminated.
+    uint32_t version;
+    OperatorType operatorType;
+    span<FieldMapping const> fieldMappings;
+};
+
+namespace CanonicalConversion
+{
+    enum convFieldIndices
+    {
+        convFieldIndexAutomaticPadding,
+        convFieldIndexDilations,
+        convFieldIndexGroupCount,
+        convFieldIndexKernelShape,
+        convFieldIndexPadding,
+        convFieldIndexStrides,
+        convFieldIndexInput,
+        convFieldIndexFilter,
+        convFieldIndexBias,
+        convFieldIndexOutput,
+        convFieldIndexActivation,
+    };
+
+    enum batchAndSpatialNormalizationFieldIndices
+    {
+        batchAndSpatialNormalizationIndexAxis,
+        batchAndSpatialNormalizationIndexEpsilon,
+        batchAndSpatialNormalizationIndexMomentum,
+        batchAndSpatialNormalizationIndexTrainingMode,
+        batchAndSpatialNormalizationIndexInput,
+        batchAndSpatialNormalizationIndexScale,
+        batchAndSpatialNormalizationIndexBias,
+        batchAndSpatialNormalizationIndexInputMean,
+        batchAndSpatialNormalizationIndexInputVariance,
+        batchAndSpatialNormalizationIndexOutput,
+        batchAndSpatialNormalizationIndexRunningMean,
+        batchAndSpatialNormalizationIndexRunningVariance,
+        batchAndSpatialNormalizationIndexActivation,
+    };
+
+    enum castFieldIndices
+    {
+        castFieldIndexNewDataType,
+        castFieldIndexInput,
+        castFieldIndexOutput,
+    };
+
+} // CanonicalConversion
+
+namespace OnnxConversion
+{
+    constinit const FieldMapping unaryElementwiseFields[] =
+    {
+        {u8"X", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, 0},
+        {u8"Y", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, 1},
+    };
+
+    constinit const FieldMapping binaryElementwiseFields[] =
+    {
+        {u8"A", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, 0},
+        {u8"B", OperatorFieldKind::Input, OperatorFieldType::TensorName, 1, 1},
+        {u8"C", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, 2},
+    };
+
+    constinit const FieldMapping convolutionFields[] =
+    {
+        // Constant inputs (attributes)
+        {u8"auto_pad", OperatorFieldKind::ConstantInput, OperatorFieldType::StringEnum, 0, CanonicalConversion::convFieldIndexAutomaticPadding}, // {"type": "string8"}, // "SAME_UPPER", "SAME_LOWER", "VALID", "NOTSET"
+        {u8"dilations", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 1, CanonicalConversion::convFieldIndexDilations}, // {"type": "int64"}, // list, defaults = 1
+        {u8"group", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 2, CanonicalConversion::convFieldIndexGroupCount}, // {"type": "int64"}, // default = 1
+        {u8"kernel_shape", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 3, CanonicalConversion::convFieldIndexKernelShape}, // {"type": "int64"}, // list, default = input tensor W
+        {u8"pads", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 4, CanonicalConversion::convFieldIndexPadding}, // {"type": "int64"}, // list [x1_begin, x2_begin...x1_end, x2_end,...], defaults = 0
+        {u8"strides", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 5, CanonicalConversion::convFieldIndexStrides}, // {"type": "int64"} // list, defaults = 1
+        // Inputs
+        {u8"X", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, CanonicalConversion::convFieldIndexInput}, // {"type": "T"},
+        {u8"W", OperatorFieldKind::Input, OperatorFieldType::TensorName, 1, CanonicalConversion::convFieldIndexFilter}, // {"type": "T"},
+        {u8"B", OperatorFieldKind::/*Optional*/Input, OperatorFieldType::TensorName, 2, CanonicalConversion::convFieldIndexBias}, // {"type": "T"} // optional, size M
+        // Outputs
+        {u8"Y", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::convFieldIndexOutput}, // {"type": "T"},
+        // "types": {"T": ["float32", "float16", "float64"]}
+    };
+
+    constinit const FieldMapping batchAndSpatialNormalizationFields[] =
+    {
+        // Constant inputs (attributes)
+        {u8"epsilon", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 0, CanonicalConversion::batchAndSpatialNormalizationIndexEpsilon}, //  {"type": "float32"},
+        {u8"momentum", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 1, CanonicalConversion::batchAndSpatialNormalizationIndexMomentum}, //  {"type": "float32"},
+        {u8"training_mode", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 2, CanonicalConversion::batchAndSpatialNormalizationIndexTrainingMode}, //  {"type": "int64"} // default = 0
+        // Inputs
+        {u8"X", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexInput}, // "type": "T"},
+        {u8"scale", OperatorFieldKind::Input, OperatorFieldType::TensorName, 1, CanonicalConversion::batchAndSpatialNormalizationIndexScale}, // "type": "T1"},
+        {u8"B", OperatorFieldKind::Input, OperatorFieldType::TensorName, 2, CanonicalConversion::batchAndSpatialNormalizationIndexBias}, // "type": "T1"},
+        {u8"input_mean", OperatorFieldKind::Input, OperatorFieldType::TensorName, 3, CanonicalConversion::batchAndSpatialNormalizationIndexInputMean}, // "type": "T2"},
+        {u8"input_var", OperatorFieldKind::Input, OperatorFieldType::TensorName, 4, CanonicalConversion::batchAndSpatialNormalizationIndexInputVariance}, // "type": "T2"}
+         // Outputs
+        {u8"Y", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexOutput}, // "type": "T"},
+        {u8"running_mean", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexRunningMean}, //"type": "T2"},
+        {u8"running_var", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexRunningVariance}, //"type": "T2"}
+        //"types": {
+        //  "T": ["float32", "float16", "bfloat16", "float64"],
+        //  "T1": ["float32", "float16", "bfloat16", "float64"],
+        //  "T2": ["float32", "float16", "bfloat16", "float64"]
+        //}
+    };
+
+    constinit const FieldMapping castFields[] =
+    {
+        // Constant inputs (attributes)
+        {u8"to", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 0, CanonicalConversion::castFieldIndexNewDataType}, //  {"type": "int64"}, // DataType enum in TensorProto
+        // Inputs
+        {u8"input", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, CanonicalConversion::castFieldIndexInput}, // "type": "T"},
+         // Outputs
+        {u8"output", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::castFieldIndexOutput}, // "type": "T"},
+        // "types": {
+        //   "T1": ["float32", "float16", "float64", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "bool8", "bfloat16"],
+        //   "T2": ["float32", "float16", "float64", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "bool8", "bfloat16"]
+        // }
+    };
+
+    constinit const OperatorMapping operatorMappings[] =
+    {
+        {u8"Abs", 12, OperatorType::Absolute, unaryElementwiseFields},
+        {u8"Add", 12, OperatorType::Add, binaryElementwiseFields},
+        {u8"BatchNormalization", 15, OperatorType::BatchAndSpatialNormalization, batchAndSpatialNormalizationFields},
+        {u8"Cast", 12, OperatorType::Cast, castFields},
+        {u8"Concat", 12, OperatorType::Concatenate},
+        {u8"Ceil", 12, OperatorType::Ceiling, unaryElementwiseFields},
+        {u8"Conv", 11, OperatorType::Convolution, convolutionFields},
+        {u8"Cos", 12, OperatorType::Cosine, unaryElementwiseFields},
+        {u8"Div", 12, OperatorType::Divide, binaryElementwiseFields},
+        {u8"Erf", 12, OperatorType::Erf, unaryElementwiseFields},
+        {u8"Exp", 12, OperatorType::Exponential, unaryElementwiseFields},
+        {u8"Expand", 12, OperatorType::Expand},
+        {u8"Floor", 12, OperatorType::Floor, binaryElementwiseFields},
+        {u8"Gemm", 12, OperatorType::Gemm},
+        {u8"InstanceNormalization", 12, OperatorType::SpatialNormalization},
+        {u8"Log", 12, OperatorType::Logarithm, unaryElementwiseFields},
+        {u8"MatMul", 12, OperatorType::MatMul},
+        {u8"Max", 12, OperatorType::Maximum, binaryElementwiseFields},
+        {u8"Min", 12, OperatorType::Minimum, binaryElementwiseFields},
+        {u8"Mul", 12, OperatorType::Multiply, binaryElementwiseFields},
+        {u8"Neg", 12, OperatorType::Erf, unaryElementwiseFields},
+        {u8"Pow", 12, OperatorType::Power, binaryElementwiseFields},
+        {u8"ReduceMean", 12, OperatorType::ReduceMean},
+        {u8"Relu", 12, OperatorType::Relu},
+        {u8"Reshape", 12, OperatorType::Reshape},
+        {u8"Resize", 12, OperatorType::Resample},
+        {u8"Sigmoid", 12, OperatorType::Sigmoid},
+        {u8"Sin", 12, OperatorType::Sine, unaryElementwiseFields},
+        {u8"Slice", 12, OperatorType::Slice},
+        {u8"Softmax", 12, OperatorType::Softmax},
+        {u8"Sqrt", 12, OperatorType::SquareRoot, unaryElementwiseFields},
+        {u8"Sub", 12, OperatorType::Subtract, binaryElementwiseFields},
+        {u8"Transpose", 12, OperatorType::Transpose},
+        {u8"Unsqueeze", 12, OperatorType::Unsqueeze},
+    };
+
+
+#if 0
+    auto operatorMappingsElementwiseBinary =
+    {
+        {InputType::Input,  0, "A", "a"},
+        {InputType::Input,  1, "B", "b"},
+        {InputType::Output, 0, "C", "c"},
+    };
+
+    auto operatorMappingsCast =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::Output, 0, "output", "output"},
+        {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
+    };
+
+    {OperatorType::Add, "add", binaryElementwiseFieldsOperatorMappings},
+    {OperatorType::Sub, "sub", binaryElementwiseFieldsOperatorMappings},
+    {OperatorType::Cast, "cast", castOperatorMappings},
+#endif
+}
+
+namespace WebNNConversion
+{
+    // MLOperand add(MLOperand a, MLOperand b);
+    // MLOperand sub(MLOperand a, MLOperand b);
+    // MLOperand mul(MLOperand a, MLOperand b);
+    // MLOperand div(MLOperand a, MLOperand b);
+    // MLOperand max(MLOperand a, MLOperand b);
+    // MLOperand min(MLOperand a, MLOperand b);
+    // MLOperand pow(MLOperand a, MLOperand b);
+    // MLOperand abs(MLOperand x);
+    // MLOperand ceil(MLOperand x);
+    // MLOperand cos(MLOperand x);
+    // MLOperand exp(MLOperand x);
+    // MLOperand floor(MLOperand x);
+    // MLOperand log(MLOperand x);
+    // MLOperand neg(MLOperand x);
+    // MLOperand sin(MLOperand x);
+    // MLOperand tan(MLOperand x);
+
+    // Stable Diffusion 1.5
+    //
+    // add
+    // argMax
+    // argMin
+    // cast
+    // concat
+    // conv
+    // cos
+    // equal
+    // erf
+    // exp
+    // expand
+    // fillSequence (range)
+    // flattenTo2D (a reshape variant)
+    // gather
+    // gemm
+    // greater
+    // groupNormalization (just reshape+instanceNorm)
+    // identity
+    // instanceNormalization
+    // layerNormalization (or MVN?)
+    // lesser
+    // matMul
+    // mul
+    // multiheadAttention (see CR)
+    // pad
+    // pow
+    // reduceL1
+    // reduceL2
+    // reduceLogSum
+    // reduceLogSumExp
+    // reduceMax
+    // reduceMean
+    // reduceMin
+    // reduceProduct
+    // reduceSum
+    // reduceSumSquare
+    // resample2d
+    // reshape
+    // shape getter
+    // sigmoid
+    // sin
+    // skipLayerNormalization
+    // slice
+    // softmax
+    // sqrt (more efficient than pow 0.5)
+    // sub
+    // squeeze (a reshape variant)
+    // transpose
+    // triangularMatrix
+    // unsqueeze (a reshape variant)
+    // elementwiseIf
+
+    constinit const FieldMapping unaryElementwiseFields[] =
+    {
+        {u8"x", OperatorFieldKind::InputParameter, OperatorFieldType::TensorName, 0, 0},
+    };
+
+    constinit const FieldMapping binaryElementwiseFields[] =
+    {
+        {u8"a", OperatorFieldKind::InputParameter, OperatorFieldType::TensorName, 0, 0},
+        {u8"b", OperatorFieldKind::InputParameter, OperatorFieldType::TensorName, 1, 1},
+    };
+
+    // TODO: Rename
+    //  enum MLConv2dFilterOperandLayout {
+    //    "oihw",
+    //    "hwio",
+    //    "ohwi",
+    //    "ihwo"
+    //  };
+    //
+    //  enum MLAutoPad {
+    //    "explicit",
+    //    "same-upper",
+    //    "same-lower"
+    //  };
+    //
+    //  dictionary MLConv2dOptions {
+    //    sequence<unsigned long> padding;
+    //    sequence<unsigned long> strides;
+    //    sequence<unsigned long> dilations;
+    //    MLAutoPad autoPad = "explicit";
+    //    unsigned long groups = 1;
+    //    MLInputOperandLayout inputLayout = "nchw";
+    //    MLConv2dFilterOperandLayout filterLayout = "oihw";
+    //    MLOperand bias;
+    //    MLActivation activation;
+    //  };
+    //
+    //  partial interface MLGraphBuilder {
+    //    MLOperand conv2d(MLOperand input, MLOperand filter, optional MLConv2dOptions options = {});
+    //  };
+    //
+    constinit const FieldMapping convolutionFields[] =
+    {
+        // Constant inputs (attributes)
+        {u8"padding", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 0, CanonicalConversion::convFieldIndexPadding}, // uint32, defaults = 0, [beginning_height, ending_height, beginning_width, ending_width]
+        {u8"strides", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 1, CanonicalConversion::convFieldIndexStrides}, // uint32, defaults = 1
+        {u8"dilations", OperatorFieldKind::ConstantInput, OperatorFieldType::List, 2, CanonicalConversion::convFieldIndexDilations}, // uint32, defaults = 1
+        {u8"autoPad", OperatorFieldKind::ConstantInput, OperatorFieldType::StringEnum, 3, CanonicalConversion::convFieldIndexAutomaticPadding}, // explicit, same-upper, same-lower
+        {u8"groups", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 4, CanonicalConversion::convFieldIndexGroupCount},
+        //{u8"inputLayout", OperatorFieldKind::ConstantInput, OperatorFieldType::StringEnum, 5, CanonicalConversion::convFieldIndexKernelShape},
+        //{u8"filterLayout", OperatorFieldKind::ConstantInput, OperatorFieldType::StringEnum, 6, CanonicalConversion::convFieldIndexKernelShape},
+        {u8"bias", OperatorFieldKind::/*Optional*/InputSeparateOption, OperatorFieldType::TensorName, 7, CanonicalConversion::convFieldIndexBias}, // {"type": "T"} // optional, size M
+        {u8"activation", OperatorFieldKind::ConstantInput, OperatorFieldType::Scalar, 8, CanonicalConversion::convFieldIndexActivation},
+        // Inputs
+        {u8"input", OperatorFieldKind::InputParameter, OperatorFieldType::TensorName, 0, CanonicalConversion::convFieldIndexInput}, // {"type": "T"},
+        {u8"filter", OperatorFieldKind::InputParameter, OperatorFieldType::TensorName, 1, CanonicalConversion::convFieldIndexFilter}, // {"type": "T"},
+        // Outputs
+        {u8"output", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::convFieldIndexOutput}, // {"type": "T"},
+        // "types": {"T": ["float32", "float16", "float64"]}
+    };
+
+    //  dictionary MLBatchNormalizationOptions {
+    //    MLOperand scale;
+    //    MLOperand bias;
+    //    unsigned long axis = 1;
+    //    float epsilon = 1e-5;
+    //    MLActivation activation;
+    //  };
+    // 
+    //  partial interface MLGraphBuilder {
+    //    MLOperand batchNormalization(
+    //      MLOperand input,
+    //      MLOperand mean,
+    //      MLOperand variance,
+    //      optional MLBatchNormalizationOptions options = {}
+    //    );
+    //  };
+    constinit const FieldMapping batchAndSpatialNormalizationFields[] =
+    {
+        // Constant inputs (attributes)
+        {u8"scale", OperatorFieldKind::InputSeparateOption, OperatorFieldType::TensorName, 1, CanonicalConversion::batchAndSpatialNormalizationIndexScale}, // "type": "T1"},
+        {u8"bias", OperatorFieldKind::InputSeparateOption, OperatorFieldType::TensorName, 2, CanonicalConversion::batchAndSpatialNormalizationIndexBias}, // "type": "T1"},
+        {u8"axis", OperatorFieldKind::SeparateOption, OperatorFieldType::Scalar, 0, CanonicalConversion::batchAndSpatialNormalizationIndexAxis}, //  {"type": "float32"},
+        {u8"epsilon", OperatorFieldKind::SeparateOption, OperatorFieldType::Scalar, 0, CanonicalConversion::batchAndSpatialNormalizationIndexEpsilon}, //  {"type": "float32"},
+        {u8"activation", OperatorFieldKind::SeparateOption, OperatorFieldType::Operator, 1, CanonicalConversion::batchAndSpatialNormalizationIndexActivation}, //  {"type": "float32"},
+        // Inputs
+        {u8"input", OperatorFieldKind::Input, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexInput}, // "type": "T"},
+        {u8"mean", OperatorFieldKind::Input, OperatorFieldType::TensorName, 1, CanonicalConversion::batchAndSpatialNormalizationIndexInputMean}, // "type": "T2"},
+        {u8"variance", OperatorFieldKind::Input, OperatorFieldType::TensorName, 2, CanonicalConversion::batchAndSpatialNormalizationIndexInputVariance}, // "type": "T2"}
+         // Outputs
+        {u8"output", OperatorFieldKind::Output, OperatorFieldType::TensorName, 0, CanonicalConversion::batchAndSpatialNormalizationIndexOutput}, // "type": "T"},
+    };
+
+    constinit const OperatorMapping operatorMappings[] =
+    {
+        {u8"abs", 0, OperatorType::Absolute, unaryElementwiseFields},
+        {u8"add", 0, OperatorType::Add, binaryElementwiseFields},
+        {u8"batchNormalization", 0, OperatorType::BatchAndSpatialNormalization, batchAndSpatialNormalizationFields},
+        {u8"cast", 0, OperatorType::Cast},
+        {u8"concat", 0, OperatorType::Concatenate},
+        {u8"ceil", 0, OperatorType::Ceiling, unaryElementwiseFields},
+        {u8"conv", 0, OperatorType::Convolution, convolutionFields},
+        {u8"cos", 0, OperatorType::Cosine, unaryElementwiseFields},
+        {u8"div", 0, OperatorType::Divide, binaryElementwiseFields},
+        {u8"erf", 0, OperatorType::Erf, unaryElementwiseFields},
+        {u8"exp", 0, OperatorType::Exponential, unaryElementwiseFields},
+        {u8"expand", 0, OperatorType::Expand},
+        {u8"floor", 0, OperatorType::Floor, binaryElementwiseFields},
+        {u8"gemm", 0, OperatorType::Gemm},
+        {u8"instanceNormalization", 0, OperatorType::SpatialNormalization},
+        {u8"log", 0, OperatorType::Logarithm, unaryElementwiseFields},
+        {u8"matMul", 0, OperatorType::MatMul},
+        {u8"max", 0, OperatorType::Maximum, binaryElementwiseFields},
+        {u8"min", 0, OperatorType::Minimum, binaryElementwiseFields},
+        {u8"mul", 0, OperatorType::Multiply, binaryElementwiseFields},
+        {u8"neg", 0, OperatorType::Negate, unaryElementwiseFields},
+        {u8"pow", 0, OperatorType::Power, binaryElementwiseFields},
+        {u8"reduceMean", 0, OperatorType::ReduceMean},
+        {u8"relu", 0, OperatorType::Relu},
+        {u8"reshape", 0, OperatorType::Reshape},
+        {u8"resize", 0, OperatorType::Resample},
+        {u8"sigmoid", 0, OperatorType::Sigmoid},
+        {u8"sin", 0, OperatorType::Sine, unaryElementwiseFields},
+        {u8"slice", 0, OperatorType::Slice},
+        {u8"softmax", 0, OperatorType::Softmax},
+        {u8"sqrt", 0, OperatorType::SquareRoot, unaryElementwiseFields},
+        {u8"sub", 0, OperatorType::Subtract, binaryElementwiseFields},
+        {u8"transpose", 0, OperatorType::Transpose},
+        {u8"unsqueeze", 0, OperatorType::Unsqueeze},
+    };
+
+#if 0
+    struct OperandMapping
+    {
+        char8_t const* name; // Null terminated.
+    };
+
+    auto operatorMappingsCast =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::Output, 0, "output", "output"},
+        {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
+    };
+
+    auto operatorMappingsElementwiseBinary =
+    {
+        {InputType::Input,  0, "A", "a"},
+        {InputType::Input,  1, "B", "b"},
+        {InputType::Output, 0, "C", "c"},
+    };
+
+    auto operatorMappingsCast =
+    {
+        {InputType::Input,  0, "input", "input"},
+        {InputType::OutputReturned, 0, "output", "output"},
+        {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
+    };
+
+    {OperatorType::Add, "add", binaryElementwiseOperatorMappings},
+    {OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
+    {OperatorType::Cast, "cast", castOperatorMappings},
+#endif
+
+} // WebNNConversion
+
+auto WebNNReadFieldValues(
+    OperatorMapping const& operatorMapping,
+    const onnx::NodeProto& node,
+    /*out*/ std::vector<FieldValue>& fieldValues
+    )
+{
+    fieldValues.clear();
+    auto fieldMappings = operatorMapping.fieldMappings;
+    for (auto& fieldMapping : fieldMappings)
+    {
+        // Ensure there is a target slot for the field.
+        auto canonicalIndex = fieldMapping.canonicalIndex;
+        if (canonicalIndex >= fieldValues.size())
+        {
+            fieldValues.resize(canonicalIndex + 1);
+        }
+        FieldValue& fieldValue = fieldValues[canonicalIndex];
+
+        switch (fieldMapping.kind)
+        {
+        case OperatorFieldKind::Input:
+            // Assign the tensor string name as byte data.
+            if (fieldMapping.index < node.input_size())
+            {
+                auto& edgeName = node.input(fieldMapping.index);
+                // Empty names are optional placeholders. So elide them.
+                if (!edgeName.empty())
+                {
+                    assign_range(fieldValue.data, as_bytes(edgeName));
+                    fieldValue.elementDataType = ElementDataType::Char8;
+                }
+            }
+            break;
+
+        case OperatorFieldKind::ConstantInput:
+            // TODO:
+            break;
+
+        case OperatorFieldKind::Output:
+            // Assign the tensor string name as byte data.
+            if (fieldMapping.index < node.output_size())
+            {
+                auto& edgeName = node.output(fieldMapping.index);
+                // Empty names are optional placeholders. So elide them.
+                if (!edgeName.empty())
+                {
+                    assign_range(fieldValue.data, as_bytes(edgeName));
+                    fieldValue.elementDataType = ElementDataType::Char8;
+                }
+            }
+            break;
+
+        default:
+            //assert("Not ready yet" && false);
+            break;
+        }
+    }
+}
+
+void WebNNWriteFieldValues(
+    OperatorMapping const& operatorMapping,
+    span<FieldValue const> fieldValues,
+    std::u8string_view sanitizedNodeName,
+    std::u8string& operatorOutput
+    )
+{
+    std::u8string options;
+    std::u8string parameters;
+    std::u8string extra;
+
+    operatorOutput.clear();
+
+    auto ensureSeparatingComma = [](std::u8string& s)
+    {
+        if (!s.empty() && !s.ends_with(u8", "))
+        {
+            s.append(u8", ");
+        }
+    };
+
+    FieldValue emptyValue;
+
+    auto fieldMappings = operatorMapping.fieldMappings;
+    for (auto& fieldMapping : fieldMappings)
+    {
+        // Ensure there is a target slot for the field.
+        uint32_t canonicalIndex = fieldMapping.canonicalIndex;
+#if 0
+        if (canonicalIndex >= fieldValues.size())
+        {
+            std::stringstream stream;
+            stream << "    // Invalid index (" << canonicalIndex << ") when writing field \"" << ToChar(fieldMapping.name) << "\" for operator \"" << ToChar(operatorMapping.name) << "\".";
+            std::string errorMessage = std::move(stream.str());
+            extra += ToUtf8Char(errorMessage);
+            extra.push_back('\n');
+            puts(errorMessage.c_str());
+            continue;
+        }
+#endif
+        FieldValue const& fieldValue = canonicalIndex >= fieldValues.size() ? emptyValue : fieldValues[canonicalIndex];
+
+        if (fieldMapping.kind & OperatorFieldKind::Parameter)
+        {
+            ensureSeparatingComma(/*inout*/ parameters);
+        }
+
+        switch (fieldMapping.kind)
+        {
+        case OperatorFieldKind::InputParameter:
+            {
+                // An input tensor is a tensor name string.
+                assert(fieldValue.elementDataType == ElementDataType::Char8);
+                std::u8string_view name(reinterpret_cast<char8_t const*>(fieldValue.data.data()), fieldValue.data.size());
+                append_range(/*inout*/ parameters, EscapeToJavascriptIdentifier(name));
+                break;
+            }
+
+        case OperatorFieldKind::ConstantInput:
+            // TODO: Handle scalars.
+            break;
+
+        case OperatorFieldKind::InputSeparateOption:
+        case OperatorFieldKind::SeparateOption:
+            ensureSeparatingComma(/*inout*/ options);
+            options.append(fieldMapping.name);
+            options.append(u8": ");
+            options.append(u8"42"); // TODO:
+            break;
+
+        case OperatorFieldKind::Output:
+            // Nothing to do, as outputs are return values.
+            break;
+
+        default:
+            //assert("Not ready yet" && false);
+            ensureSeparatingComma(/*inout*/ parameters);
+            parameters.append(u8"/*");
+            parameters.append(fieldMapping.name);
+            parameters.append(u8"*/");
+            break;
+        }
+    }
+
+    // Write options. e.g. const clampOptions = {minValue: 42, maxValue: 93}
+    if (!options.empty())
+    {
+        operatorOutput.append(u8"    const ");
+        operatorOutput.append(sanitizedNodeName);
+        operatorOutput.append(u8"Options = {");
+        operatorOutput.append(options);
+        operatorOutput.append(u8"};\n");
+    }
+
+    // Write builder statement. e.g. const clampOutput = graphBuilder.clamp(clampOptions);
+    operatorOutput.append(u8"    const ");
+    operatorOutput.append(sanitizedNodeName);
+    operatorOutput.append(u8" = graphBuilder.");
+    operatorOutput.append(operatorMapping.name);
+    operatorOutput.append(u8"(");
+    if (!options.empty())
+    {
+        // Append options. e.g clamp(clampOptions)
+        ensureSeparatingComma(/*inout*/ parameters);
+        parameters.append(sanitizedNodeName);
+        parameters.append(u8"Options");
+    }
+    operatorOutput.append(parameters);
+    operatorOutput.append(u8");\n");
+
+    operatorOutput.append(extra);
+}
+
+void ConvertOnnxToWebNNJavascript(
+    onnx::ModelProto const& model,
+    std::ofstream& outputFile,
+    _In_z_ wchar_t const* outputFilePath
+)
+{
+    std::map<std::u8string, uint32_t> freeDimensionMap; // TODO: Pass in as parameter.
+    const onnx::GraphProto& onnxGraph = model.graph();
+
+    auto const& nodes = onnxGraph.node();
+    //--std::vector<std::u8string> sanitizedNodeNames;
+    //--sanitizedNodeNames.reserve(nodes.size());
     std::set<std::u8string, std::less<>> constantTensors;
     std::vector<std::u8string_view> constantTensorsInOrder;
 
-    outputFile << header;
-    outputFile << modelFunctionHeader;
+    std::filesystem::path outputFileFullPath(std::filesystem::absolute(std::filesystem::path(outputFilePath)));
+    std::filesystem::path outputFilename(outputFileFullPath.filename());
+    std::filesystem::path filenameNoExtension(outputFilename);
+    std::u8string filenameNoExtensionTemp = filenameNoExtension.u8string();
+    std::u8string_view standardWebnnJsExtension = u8".webnn.js";
+    if (filenameNoExtensionTemp.ends_with(standardWebnnJsExtension))
+    {
+        filenameNoExtensionTemp.resize(filenameNoExtensionTemp.size() - standardWebnnJsExtension.size());
+        filenameNoExtension = filenameNoExtensionTemp;
+    }
+    else
+    {
+        filenameNoExtension.replace_extension("");
+    }
+    std::u8string sanitizedModelName(EscapeToJavascriptIdentifier(filenameNoExtension.u8string()));
 
-    // Gather the list of constant tensors defined with static weights inside the graph.
-    outputFile << "\n    ////////////////////////////////////////\n    // Constants:\n";
+    std::filesystem::path constantDataFullPath(outputFileFullPath);
+    constantDataFullPath.replace_extension("dat");
+    std::filesystem::path constantDataFilename(constantDataFullPath.filename());
+
+    outputFile << "// File: " << outputFilename << "\n"
+               << "// Model: " << sanitizedModelName << "\n"
+               << "\n";
+
+    outputFile << webnnCreateContextFunctionString;
+    outputFile << webnnBuildModelFunctionHeaderString;
+
+    // Gather the list of constant tensors defined with static weights inside the graph. e.g.:
+    //
+    //  const constantTensorDesc = {type: 'float32', dimensions: [2, 2]};
+    //  const constant = graphBuilder.constant(constantTensorDesc, new Float32Array(constantBuffer, 0, 32));
+
+    printf("Writing constant tensor definitions...\n");
+
+    outputFile << "    ////////////////////////////////////////\n    // Constants:\n"
+                  "\n"
+                  "    let constantBuffer;\n"
+                  "    fetch('./" << constantDataFilename << "')\n"
+                  "        .then(response => response.arrayBuffer())\n"
+                  "        .then(data => (constantBuffer = data));\n"
+                  "\n";
+
     uint64_t totalConstantBufferSize = 0;
+    std::vector<std::byte> constantBuffer;
 
     for (const onnx::TensorProto& tensorProto : onnxGraph.initializer())
     {
@@ -2679,173 +3519,335 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
         std::u8string const& unsanitizedName = ToUtf8Char(tensorProto.name());
         constantTensors.insert(unsanitizedName);
         std::u8string sanitizedName = EscapeToJavascriptIdentifier(unsanitizedName);
-
         onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(tensorProto.data_type());
         std::vector<int64_t> dimensions(tensorProto.dims().begin(), tensorProto.dims().end());
+
         uint64_t tensorByteSize = GetByteSizeFromDimensions64(dimensions, dataType);
+
+        // e.g. const squeezenet0_conv0_weightTensorDesc = {type: float32, dimensions: [64,3,3,3]};
+        std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
+        // e.g. Float32Array(concatenatedConstantBuffer, 6912, 256)
+        std::u8string arrayBufferString = GetWebNNArrayBufferDefinition(dataType, totalConstantBufferSize, tensorByteSize);
+
+        std::vector<std::byte> tensorByteData = GetOnnxTensorRawByteData(tensorProto);
+        constantBuffer.insert(constantBuffer.end(), tensorByteData.begin(), tensorByteData.end());
+
         if (totalConstantBufferSize + tensorByteSize < totalConstantBufferSize)
         {
             printf("Warning: Exceeded 4G tensor byte size at tensor '%s'. The model will likely fail to execute.\n", ToChar(unsanitizedName).c_str());
         }
-
-        std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
-        std::u8string arrayBufferString = GetWebNNArrayBufferDefinition(dataType, totalConstantBufferSize, tensorByteSize);
-
         totalConstantBufferSize += tensorByteSize;
         outputFile
-            << "    " << ToChar(tensorDescString)
-            << "    const " << ToChar(sanitizedName) << " = graphBuilder.constant(" << ToChar(sanitizedName) << "TensorDesc, " << ToChar(arrayBufferString) << ");\n"
+            << "    " << tensorDescString
+            << "    const " << sanitizedName << " = graphBuilder.constant(" << sanitizedName << "TensorDesc, " << arrayBufferString << ");\n"
             ;
     }
 
-    // Write input/output tensors.
-    //--outputFile << inputsOutputsComment;
-    //--outputFile << inputOutputNodeStyle;
+    // Write the constant data as one large concatenated file.
+    // The graphBuilder.constant() calls have the offsets.
+    {
+        printf("Writing constant data to file \"%s\".\n", constantDataFullPath.string().c_str());
+        std::ofstream constantDataOutputFile(constantDataFullPath, std::ios::out);
+        constantDataOutputFile.write(reinterpret_cast<char const*>(constantBuffer.data()), constantBuffer.size());
+    }
+
+    // Keep track of which inputs are valid dynamic inputs.
+    // Exclude any "inputs" that are actually constants.
+    const int32_t inputCount = onnxGraph.input().size();
+    const int32_t outputCount = onnxGraph.output().size();
+    std::vector<bool> isInputValid(inputCount);
+    std::vector<bool> isOutputValid(outputCount);
+
+    for (int32_t inputIndex = 0; inputIndex < inputCount; ++inputIndex)
+    {
+        onnx::ValueInfoProto const& valueInfo = onnxGraph.input(inputIndex);
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue; // Skip constant nodes, which aren't actually dynamic graph inputs.
+        }
+        if (valueInfo.type().value_case() != onnx::TypeProto::ValueCase::kTensorType)
+        {
+            printf("Input '%s' has an unknown graph input type (expected tensor).\n", ToChar(unsanitizedName.c_str()));
+            continue; // Skip unknown edge types.
+        }
+        isInputValid[inputIndex] = true;
+    }
+
+    for (int32_t outputIndex = 0; outputIndex < outputCount; ++outputIndex)
+    {
+        onnx::ValueInfoProto const& valueInfo = onnxGraph.output(outputIndex);
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (valueInfo.type().value_case() != onnx::TypeProto::ValueCase::kTensorType)
+        {
+            printf("Output '%s' has an unknown graph output type (expected tensor).\n", ToChar(unsanitizedName.c_str()));
+            continue; // Skip unknown edge types.
+        }
+        isOutputValid[outputIndex] = true;
+    }
 
     // Write inputs, excluding any constant tensors. Newer ONNX models do not have this issue,
     // as they only declare true inputs, but some old models defined all constant tensors as
     // graph inputs too, which confuses later logic when trying to bind tensors to inputs
     // (e.g. opset 9 squeezenet).
+    //
+    // e.g.:
+    //  const dataTensorDesc = {type: float32, dimensions: [1,3,224,224]};
+    //  const data = graphBuilder.input('data', dataTensorDesc);
+
+    printf("Writing input tensor definitions...\n");
+
     outputFile << "\n    ////////////////////////////////////////\n    // Inputs:\n";
 
-    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.input())
+    for (int32_t inputIndex = 0; inputIndex < inputCount; ++inputIndex)
+    {
+        if (!isInputValid[inputIndex])
+        {
+            continue;
+        }
+
+        onnx::ValueInfoProto const& valueInfo = onnxGraph.input(inputIndex);
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        auto [sanitizedName, dataType, dimensions] = GetOnnxValueInfoProperties(valueInfo, freeDimensionMap);
+
+        std::u8string tensorDescString = GetWebNNTensorDescDefinition(sanitizedName, dataType, dimensions);
+
+        outputFile << "    " << tensorDescString
+                   << "    const " << sanitizedName << " = graphBuilder.input(\"" << unsanitizedName << "\", " << sanitizedName << "TensorDesc);\n"
+                   ;
+    }
+
+    printf("Writing output tensor definitions...\n");
+
+    outputFile << "\n    ////////////////////////////////////////\n    // Outputs:\n";
+    for (int32_t outputIndex = 0; outputIndex < outputCount; ++outputIndex)
+    {
+        if (!isOutputValid[outputIndex])
+        {
+            continue;
+        }
+
+        onnx::ValueInfoProto const& valueInfo = onnxGraph.output(outputIndex);
+        auto [sanitizedName, dataType, dimensions] = GetOnnxValueInfoProperties(valueInfo, freeDimensionMap);
+        std::u8string tensorDescString = GetWebNNTensorDesc(dataType, dimensions);
+
+        outputFile << "    // " << sanitizedName << " " << tensorDescString << '\n';
+    }
+
+    // Write operator nodes.
+
+    printf("Writing graph operators...\n");
+
+    std::map<std::u8string_view, OperatorMapping const*> onnxToCanonicalMappings;
+    std::map<OperatorType, OperatorMapping const*> canonicalToWebnnMappings;
+
+    //onnxToCanonicalMapping
+    for (auto& operatorMapping : OnnxConversion::operatorMappings)
+    {
+        onnxToCanonicalMappings[operatorMapping.name] = &operatorMapping;
+    }
+
+    for (auto& operatorMapping : WebNNConversion::operatorMappings)
+    {
+        canonicalToWebnnMappings[operatorMapping.operatorType] = &operatorMapping;
+    }
+
+    std::vector<FieldValue> fieldValues;
+
+    // Enumerate all nodes, converting from ONNX operators to WebNN.
+
+    std::u8string operatorOutput;
+    outputFile << "\n    ////////////////////////////////////////\n    // Operators:\n";
+    for (int32_t nodeIndex = 0, nodeCount = nodes.size(); nodeIndex < nodeCount; ++nodeIndex)
+    {
+        onnx::NodeProto const& node = nodes[nodeIndex];
+        std::u8string const& unsanitizedNodeName = ToUtf8Char(node.name());
+        std::u8string const& operatorTypeName = ToUtf8Char(node.op_type());
+
+        std::u8string sanitizedNodeName;
+        // If no name, then just use current node index for a unique name.
+        sanitizedNodeName = unsanitizedNodeName.empty() ? ToUtf8Char("$" + std::to_string(nodeIndex)) : EscapeToJavascriptIdentifier(unsanitizedNodeName);
+
+        OperatorType operatorType = OperatorType::Unknown;
+        OperatorMapping const* onnxToCanonicalMapping = nullptr;
+        OperatorMapping const* canonicalToWebnnMapping = nullptr;
+
+        auto onnxToCanonicalIterator = onnxToCanonicalMappings.find(operatorTypeName);
+        if (onnxToCanonicalIterator != onnxToCanonicalMappings.end())
+        {
+            onnxToCanonicalMapping = onnxToCanonicalIterator->second;
+            operatorType = onnxToCanonicalMapping->operatorType;
+        }
+        auto canonicalToWebnnIterator = canonicalToWebnnMappings.find(operatorType);
+        if (canonicalToWebnnIterator != canonicalToWebnnMappings.end())
+        {
+            canonicalToWebnnMapping = canonicalToWebnnIterator->second;
+        }
+
+        switch (operatorType)
+        {
+        case OperatorType::Relu:
+            outputFile << "    const " << sanitizedNodeName
+                       << " = graphBuilder.relu(" << EscapeToJavascriptIdentifier(node.input(0)) << ");\n"
+                       ;
+            break;
+
+        case OperatorType::Add:
+            outputFile << "    const " << sanitizedNodeName
+                       << " = graphBuilder.add(" << EscapeToJavascriptIdentifier(node.input(0)) << ", " << EscapeToJavascriptIdentifier(node.input(1)) << ");\n"
+                       ;
+            break;
+
+        case OperatorType::Unknown:
+            printf("Unknown operator \"%s\"\n", ToChar(operatorTypeName.c_str()));
+            outputFile << "    // unknown operator - writing out placeholder\n";
+            outputFile << "    const " << sanitizedNodeName
+                       << " = graphBuilder." <<  operatorTypeName
+                       << "();\n";
+            break;
+
+        default:
+            WebNNReadFieldValues(*onnxToCanonicalMapping, node, /*out*/ fieldValues);
+            // TODO: Massage values when necessary, such as padding or expanding.
+            // TODO: Remap enums as needed.
+            WebNNWriteFieldValues(*canonicalToWebnnMapping, fieldValues, sanitizedNodeName, /*out*/ operatorOutput);
+            outputFile << operatorOutput;
+            break;
+        }
+        //--sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
+    }
+
+    outputFile << webnnBuildModelFunctionFooterString;
+
+    // Write all input/output buffers for compute method.
+    // TODO:
+
+#if 1
+    // Fill in compute model function.
+    // e.g.:
+    //
+    //  export async function ComputeModel( // TODO: Append model name so multiple distinct models can be imported by caller.
+    //      mlContext /*MLContext*/,
+    //      graph /*MLGraph*/,
+    //      bufferA, // new Float32Array(24); dimensions=[2,3,4]
+    //      bufferB , // new Float32Array(24); dimensions=[2,3,4]
+    //      bufferC, // new Float32Array(8); dimensions=[2,4]
+    //  )
+    //  {
+    //      const inputs = {'A': bufferA, 'B': bufferB};
+    //      const outputs = {'C': bufferC};
+
+    outputFile << webnnComputeModelFunctionHeaderString;
+
+    std::u8string computeParametersString;
+    std::u8string inputBindingsString = u8"    const inputs = {";
+    std::u8string outputBindingsString = u8"    const outputs = {";
+
+    auto appendComputeParameterAndBindingEntry = [&](
+        onnx::ValueInfoProto const& valueInfo,
+        /*inout*/ std::u8string& parameterString,
+        /*inout*/ std::u8string& bindingsString
+        ) -> void
+    {
+        auto [sanitizedName, dataType, dimensions] = GetOnnxValueInfoProperties(valueInfo, freeDimensionMap);
+
+        // Append parameter - e.g.:
+        //    A, // new Float32Array(24); dimensions=[2,3,4]
+        parameterString.append(u8"    ");
+        parameterString.append(sanitizedName);
+        parameterString.append(u8", // ");
+        parameterString.append(GetWebNNArrayTypeName(dataType));
+        parameterString.append(u8"(");
+        parameterString.append(ToUtf8Char(std::to_string(ComputeElementCount64(dimensions))));
+        parameterString.append(u8") ");
+        parameterString.append(GetWebNNTensorDesc(dataType, dimensions));
+        parameterString.append(u8"\n");
+
+        // Append binding - e.g.:
+        //  const inputs = {"A": bufferA, "B": bufferB};
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (!bindingsString.ends_with(u8"{"))
+        {
+            bindingsString.append(u8", ");
+        }
+        bindingsString.append(u8"\"");
+        bindingsString.append(unsanitizedName);
+        bindingsString.append(u8"\": ");
+        bindingsString.append(sanitizedName);
+    };
+
+    // Fill in all parameters and bindings...
+    for (int32_t inputIndex = 0; inputIndex < inputCount; ++inputIndex)
+    {
+        if (isInputValid[inputIndex])
+        {
+            onnx::ValueInfoProto const& valueInfo = onnxGraph.input(inputIndex);
+            appendComputeParameterAndBindingEntry(valueInfo, /*inout*/ computeParametersString, /*inout*/ inputBindingsString);
+        }
+    }
+
+    for (int32_t outputIndex = 0; outputIndex < outputCount; ++outputIndex)
+    {
+        if (isOutputValid[outputIndex])
+        {
+            onnx::ValueInfoProto const& valueInfo = onnxGraph.output(outputIndex);
+            appendComputeParameterAndBindingEntry(valueInfo, /*inout*/ computeParametersString, /*inout*/ outputBindingsString);
+        }
+    }
+
+    outputFile << computeParametersString;
+    outputFile << ")\n{\n";
+    outputFile << inputBindingsString << "}\n";
+    outputFile << outputBindingsString << "}\n";
+
+#if 0 // DELETE
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
     {
         std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
         if (constantTensors.contains(unsanitizedName))
         {
             continue;
         }
-        if (valueInfo.type().value_case() != onnx::TypeProto::ValueCase::kTensorType)
-        {
-            printf("Input '%s' has an unknown graph input type (expected tensor)\n", ToChar(unsanitizedName.c_str()));
-            continue; // Skip unknown inputs. (the model will likely fail to run though)
-        }
 
-        std::u8string sanitizedName = EscapeToJavascriptIdentifier(unsanitizedName);
-        onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(valueInfo.type().tensor_type().elem_type());
-        auto shape = valueInfo.type().tensor_type().shape();
-        std::vector<int64_t> dimensions;
-
-        // Append each dimension.
-        for (auto& dim : shape.dim())
-        {
-            if (dim.has_dim_value())
-            {
-                dimensions.push_back(dim.dim_value());
-            }
-            else if (dim.has_dim_param())
-            {
-                auto& dimParam = ToUtf8Char(dim.dim_param());
-                int64_t dimensionSize = 1u;
-                if (auto it = freeDimensionMap.find(dimParam); it != freeDimensionMap.end())
-                {
-                    dimensionSize = it->second;
-                }
-                else
-                {
-                    printf(
-                        "Warning: Input '%s' has unknown free dimension (%s). Setting size to 1.\n",
-                        ToChar(unsanitizedName).c_str(),
-                        dim.dim_param().c_str()
-                    );
-                }
-                dimensions.push_back(1u);
-            }
-            else
-            {
-                printf(
-                    "Warning: Input '%s' has unknown dimension type. Setting size to 1.\n",
-                    ToChar(unsanitizedName.c_str())
-                );
-            }
-        }
-        //--uint32_t tensorByteSize = GetByteSizeFromDimensions(dimensions, dataType);
-
-        std::u8string tensorDescString = GetWebNNTensorDescDefinition(unsanitizedName, dataType, dimensions);
-
-        outputFile
-            << "    " << ToChar(tensorDescString)
-            << "    const " << ToChar(sanitizedName) << " = graphBuilder.input('" << ToChar(unsanitizedName) << "', " << ToChar(sanitizedName) << "TensorDesc);\n"
-            ;
+        outputFile << "    // const bufferA = new Float32Array([0,1,2,3]);\n";
     }
-
-    outputFile << "\n    ////////////////////////////////////////\n    // Outputs:\n";
-    for (const onnx::ValueInfoProto& valueInfo : onnxGraph.output())
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
     {
-        outputFile << "    // " << EscapeToJavascriptIdentifier(valueInfo.name()) << '\n';
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
+
+        outputFile << "    // const bufferC = new Float32Array(42);\n";
     }
-
-    bool showConstantTensors = false;
-    //--if (showConstantTensors)
-    //--{
-    //--    // Write constant tensors.
-    //--    //--outputFile << constantTensorsComment;
-    //--    //--outputFile << constantNodeStyle;
-    //--
-    //--    // Enumerate them in node binding order rather than the arbitrary order they are listed in the model
-    //--    // or in alphabetic order, since node binding order is more intuitive when looking at the graph
-    //--    // since the inputs follow the ONNX order.
-    //--    constantTensorsInOrder.reserve(constantTensors.size());
-    //--    for (const onnx::NodeProto& node : nodes)
-    //--    {
-    //--        for (std::string const& tensorName : node.input())
-    //--        {
-    //--            if (constantTensors.contains(ToUtf8Char(tensorName)))
-    //--            {
-    //--                constantTensorsInOrder.push_back(ToUtf8Char(tensorName));
-    //--            }
-    //--        }
-    //--        for (std::string const& tensorName : node.output())
-    //--        {
-    //--            if (constantTensors.contains(ToUtf8Char(tensorName)))
-    //--            {
-    //--                constantTensorsInOrder.push_back(ToUtf8Char(tensorName));
-    //--            }
-    //--        }
-    //--    }
-    //--
-    //--    for (auto& name : constantTensorsInOrder)
-    //--    {
-    //--        outputFile << ToChar(EscapeToJavascriptIdentifier(name));
-    //--        outputFile << '\n';
-    //--    }
-    //--}
-
-    // Write operator nodes.
-    //--outputFile << operatorsComment;
-    //--outputFile << operatorNodeStyle;
-
-    // Enumerate all nodes, converting from ONNX operators to WebNN.
-    outputFile << "\n    ////////////////////////////////////////\n    // Operators:\n";
-    for (int nodeIndex = 0, nodeCount = nodes.size(); nodeIndex < nodeCount; ++nodeIndex)
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.input())
     {
-        const onnx::NodeProto& node = nodes[nodeIndex];
-        const std::u8string& nodeName = ToUtf8Char(node.name());
-        const std::u8string& operatorTypeName = ToUtf8Char(node.op_type());
-
-        std::u8string sanitizedNodeName;
-        if (nodeName.empty())
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
         {
-            // Just use current node index for unique name.
-            sanitizedNodeName = ToUtf8Char(std::to_string(nodeIndex));
-        }
-        else
-        {
-            sanitizedNodeName = EscapeToJavascriptIdentifier(nodeName);
+            continue;
         }
 
-        //--outputFile << ToChar(sanitizedNodeName) << " [label=" << ToChar(EscapeToJavascriptIdentifier(operatorTypeName)) << "]\n";
-        outputFile << "    const " << ToChar(sanitizedNodeName)
-                   << " = graphBuilder." <<  ToChar(operatorTypeName)
-                   << "();\n"
-                   ; // TODO: Remap this from ONNX to WebNN.
-        sanitizedNodeNames.push_back(std::move(sanitizedNodeName));
+        outputFile << "    // const inputs = {'A': bufferA, 'B': bufferB};\n";
     }
+    for (onnx::ValueInfoProto const& valueInfo : onnxGraph.output())
+    {
+        std::u8string const& unsanitizedName = ToUtf8Char(valueInfo.name());
+        if (constantTensors.contains(unsanitizedName))
+        {
+            continue;
+        }
 
-    // Write all edges.
-    //--outputFile << edgesComment;
-    //--outputFile << intermediateNodeStyle;
+        outputFile << "    const outputs = {'C': bufferC};\n";
+    }
+#endif
 
+    outputFile << "    mlContext.compute(graph, inputs, outputs);\n";
+    outputFile << webnnComputeModelFunctionFooterString;
+#endif
+
+#if 0 // DELETE
     auto writeEdge = [&](std::u8string_view sanitizedNodeName, std::u8string_view tensorName, bool isInput) -> void
     {
         if (!showConstantTensors && constantTensors.contains(tensorName))
@@ -2863,7 +3865,7 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
         }
 
         // Print the edge. If input edge to operator, then avoid the arrowhead.
-        //--outputFile << ToChar(first) << " -> " << ToChar(second) << (isInput ? " [arrowhead=normal]" : " [arrowhead=none]") << "\n";
+        //--outputFile << first << " -> " << second << (isInput ? " [arrowhead=normal]" : " [arrowhead=none]") << "\n";
     };
 
     for (int nodeIndex = 0, nodeCount = nodes.size(); nodeIndex < nodeCount; ++nodeIndex)
@@ -2880,9 +3882,9 @@ function BuildModel(mlContext /*: MLContext*/, mlGraphBuilder /*: MLGraphBuilder
             writeEdge(sanitizedNodeName, ToUtf8Char(tensorName), /*isInput*/ false);
         }
     }
+#endif
 
-    outputFile << modelFunctionFooter;
-    outputFile << footer;
+    outputFile << webnnPrintTensorsFunctionString;
 }
 
 #if 0
@@ -2939,106 +3941,12 @@ Relu x 50
 Reshape x 1
 */
 
-enum class OperatorType
-{
-    Add,
-    Cast,
-    Concat,
-    Conv,
-    Cos,
-    Div,
-    Erf,
-    Expand,
-    Gemm,
-    InstanceNormalization,
-    MatMul,
-    Mul,
-    Pow,
-    ReduceMean,
-    Relu,
-    Reshape,
-    Resize,
-    Sigmoid,
-    Sin,
-    Slice,
-    Softmax,
-    Sqrt,
-    Sub,
-    Transpose,
-    Unsqueeze,
-};
-
-struct NameIndexMapping
-{
-    std::string_view name;
-    uint32_t index;
-};
-
-NameIndexMapping onnxOperatorMapping[] =
-{
-    {"Add", OperatorType::Add},
-    {"Cast", OperatorType::Cast},
-    {"Concat", OperatorType::Concat},
-    {"Conv", OperatorType::Conv},
-    {"Cos", OperatorType::Cos},
-    {"Div", OperatorType::Div},
-    {"Erf", OperatorType::Erf},
-    {"Expand", OperatorType::Expand},
-    {"Gemm", OperatorType::Gemm},
-    {"InstanceNormalization", OperatorType::InstanceNormalization},
-    {"MatMul", OperatorType::MatMul},
-    {"Mul", OperatorType::Mul},
-    {"Pow", OperatorType::Pow},
-    {"ReduceMean", OperatorType::ReduceMean},
-    {"Relu", OperatorType::Relu},
-    {"Reshape", OperatorType::Reshape},
-    {"Resize", OperatorType::Resize},
-    {"Sigmoid", OperatorType::Sigmoid},
-    {"Sin", OperatorType::Sin},
-    {"Slice", OperatorType::Slice},
-    {"Softmax", OperatorType::Softmax},
-    {"Sqrt", OperatorType::Sqrt},
-    {"Sub", OperatorType::Sub},
-    {"Transpose", OperatorType::Transpose},
-    {"Unsqueeze", OperatorType::Unsqueeze},
-};
 
 struct TensorCollectionInformation
 {
 
 };
 
-auto binaryElementwiseOperatorMappingsOnnx =
-{
-    {InputType::Input,  0, "A", "a"},
-    {InputType::Input,  1, "B", "b"},
-    {InputType::Output, 0, "C", "c"},
-};
-
-auto castOperatorMappingsOnnx =
-{
-    {InputType::Input,  0, "input", "input"},
-    {InputType::Output, 0, "output", "output"},
-    {InputType::InputConstant, 0, "to", "targetDataType", dataTypeEnumRemapperOnnx},
-};
-
-auto binaryElementwiseOperatorMappingsWebnn =
-{
-    {InputType::Input,  0, "A", "a"},
-    {InputType::Input,  1, "B", "b"},
-    {InputType::Output, 0, "C", "c"},
-};
-
-auto castOperatorMappingsWebnn =
-{
-    {InputType::Input,  0, "input", "input"},
-    {InputType::OutputReturned, 0, "output", "output"},
-    {InputType::InputConstant, 0, "dataType", "targetDataType", dataTypeEnumRemapperWebnn},
-};
-
-{OperatorType::Add, "add", binaryElementwiseOperatorMappings},
-{OperatorType::Sub, "sub", binaryElementwiseOperatorMappings},
-{OperatorType::Cast, "cast", castOperatorMappings},
 
 std::string EncodeNodeName(std::string_view nodeName)
 {
@@ -3066,7 +3974,7 @@ void WriteTensorInputs()
 
 }
 
-#if 0
+#if 0 // TODO:::
 
 const inputTensorDesc = {type: 'float32', dimensions: [2, 2]};
 const constantDesc = { type: 'float32', dimensions: [1] };
@@ -3101,7 +4009,7 @@ case OperatorType::Add:
 case OperatorType::Concat:
 case OperatorType::Conv:
 case OperatorType::Cos:
-case OperatorType::Div:
+case OperatorType::Divide:
 case OperatorType::Erf:
 case OperatorType::Expand:
 case OperatorType::Gemm:
@@ -3300,7 +4208,7 @@ void StoreModel(
     else if (outputFileType == FileType::WebNNJavascript)
     {
         std::ofstream outputFile(outputFilename, std::ios::out);
-        ConvertOnnxToWebNNJavascript(model, outputFile);
+        ConvertOnnxToWebNNJavascript(model, outputFile, outputFilename);
         succeeded = true;
     }
     else if (outputFileType != FileType::Unknown)
