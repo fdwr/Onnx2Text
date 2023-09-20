@@ -332,6 +332,7 @@
     <ClCompile Include="onnx.pb.cc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="half\half.hpp" />
     <ClInclude Include="onnx.pb.h" />
   </ItemGroup>
   <ItemGroup>
