@@ -316,6 +316,7 @@ auto clamped_span(ContainerType& oldSpan, size_t offset, size_t count) -> span<d
 // Reads a byte array from std::vector/std::string/std::array as a struct.
 template <typename NewStructType, typename OldTypeContainer>
 const NewStructType& read_as(OldTypeContainer&& oldSpan)
+requires requires {std::data(oldSpan); std::size(oldSpan);}
 {
     span<const std::byte> byteSpan = as_bytes(oldSpan);
     size_t byteSize = byteSpan.size_bytes();
