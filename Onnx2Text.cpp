@@ -1,6 +1,8 @@
 #define _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING 1 // For Google Protobuf using std::iterator as a base class in C++17.
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
 #define _SILENCE_CXX20_IS_POD_DEPRECATION_WARNING 1 // For Google Protobuf std::is_pod in generated_message_table_driven.h.
+#define _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS // For Google Protobuf: error C1189: #error:  <hash_map> is deprecated
+#define _SILENCE_CXX23_DENORM_DEPRECATION_WARNING // For Google Protobuf: Warning C4996: 'std::float_denorm_style': warning STL4042: std::float_denorm_style, std::numeric_limits::has_denorm, and std::numeric_limits::has_denorm_loss are deprecated in C++23. Y
 #define NOMINMAX
 
 #include <iostream>
@@ -13,6 +15,7 @@
 #include <codecvt>
 #include <charconv>
 #include <random>
+#include <hash_map> // For Google Protobuf: std::hash_compare is not defined.
 
 #pragma warning(push)
 #pragma warning(disable: 4146) // unary minus operator applied to unsigned type, result still unsigned
@@ -2211,7 +2214,14 @@ void DisplayModelInformation(onnx::ModelProto const& model)
     std::map<std::string, uint32_t> operatorTypeCounts;
     for (const onnx::NodeProto& node : graphProto.node())
     {
-        auto operatorType = node.op_type();
+        // Prepend domain if present. e.g. "com.microsoft.MultiheadAttention"
+        std::string operatorType;
+        if (node.has_domain())
+        {
+            operatorType.append_range(node.domain());
+            operatorType.push_back('.');
+        }
+        operatorType.append_range(node.op_type());
         operatorTypeCounts[operatorType]++;
     }
 
