@@ -1,5 +1,5 @@
 Onnx2Text  
-2018-07-19..2023-06-05  
+2018-07-19..2024-06-05  
 Dwayne Robinson ([FDwR](https://github.com/fdwr))  
 
 - Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
