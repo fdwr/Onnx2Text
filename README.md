@@ -1,6 +1,6 @@
 Onnx2Text  
-2018-07-19..2023-03-02  
-Dwayne Robinson (FDwR)  
+2018-07-19..2023-06-05  
+Dwayne Robinson ([FDwR](https://github.com/fdwr))  
 
 - Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
 - Converts an ONNX model to GraphViz dot file.
@@ -47,7 +47,7 @@ I needed to make small edits to existing models for debugging, and I didn't want
 
 # Parameters
 * input/output files - graph (onnx/pb/text) or tensor (onnxtensor/npy/pb/text/csv/dat).
-* `-dimensions` - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "()" to indicate 0D scalar.
+* `-dimensions` - explicit tensor dimensions for .csv or .dat file. Defaults to 1D element count from source data. Pass "`-dimensions ()`" to indicate 0D scalar.
 * `-datatype` - tensor element type (float16,float32,float64,int8,uint8,int16,uint16,int32,uint32,int64,uint64,bool8,float16m7e8s1/bfloat16). This isn't usually needed unless reading from raw data.
 * `-zeromodelvalues` - zero any tensor values in model (clears model initializer weights - useful for sharing confidential models without revealing trained results) except tiny 1D tensors needed for shapes.
 * `-row` - single row or range for .csv.
@@ -82,7 +82,9 @@ I needed to make small edits to existing models for debugging, and I didn't want
 # Building
 Load Visual Studio solution (Onnx2Text.sln), and build.
 
-The target is Windows, as there are dependencies on WIC (Windows 7+) for image loading/saving, but it *might* compile fine for Linux too if you `#ifdef`'d those parts and don't need image conversion. Though, I don't use Linux frequently enough to support that target. 
+# Dependencies
+- Windows 7+.
+- Linux/MacOS *might* build okay, as I added `#ifdef _WIN32`'s around the pertinent parts (particularly WIC image conversion), but I don't use them frequently enough to verify and support those OS's.
 
 # Build Google Protobuf .lib yourself:
 The protobuf-3.5.1 directory in this project contains the bare minimum .lib and .h files to build
