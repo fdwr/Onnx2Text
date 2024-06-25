@@ -2216,7 +2216,7 @@ void DisplayModelInformation(onnx::ModelProto const& model)
     {
         // Prepend domain if present. e.g. "com.microsoft.MultiheadAttention"
         std::string operatorType;
-        if (node.has_domain())
+        if (node.has_domain() && !node.domain().empty())
         {
             operatorType.append_range(node.domain());
             operatorType.push_back('.');
