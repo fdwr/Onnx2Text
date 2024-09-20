@@ -3532,6 +3532,7 @@ void PrintUsage()
                  "        .onnx - Open Neural Exchange model protobuf\n"
                  "        .pb - Google Protobuf (with -graph)\n"
                  "        .txt/.prototxt - Protobuf text\n"
+                 "        .dot - GraphViz dot graph\n"
                  "    Tensor file types:\n"
                  "        .onnxtensor - Open Neural Exchange tensor\n"
                  "        .pb - Google Protobuf (with -tensor)\n"
