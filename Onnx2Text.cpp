@@ -2098,10 +2098,10 @@ void PrintTensorInfo(
     {
         printf(
             "Tensor:\n"
-            "  name: \"%.*hs\"\n"
-            "  datatype: %hs\n"
-            "  dimensions: %hs\n"
-            "  byte size: %d bytes\n"
+            "  Name: \"%.*hs\"\n"
+            "  Data type: %hs\n"
+            "  Dimensions: %hs\n"
+            "  Byte size: %d bytes\n"
             ,
             uint32_t(name.size()),
             ToChar(name.data()),
@@ -2504,6 +2504,74 @@ void LoadModel(
     }
 }
 
+bool StoreModelTensor(
+    onnx::TensorProto const& onnxTensor,
+    FileType outputFileType,
+    std::wstring_view baseFileName,
+    size_t baseFileNameInsertionPoint
+    )
+{
+    // Read data type, dimensions, and name.
+    // Someone changed the data type enum in protobuf to a raw int32, which forced manual casting :/.
+    onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type());
+
+    std::vector<int32_t> dimensions;
+    for (auto v : onnxTensor.dims())
+    {
+        dimensions.push_back(static_cast<int32_t>(v));
+    }
+
+    std::wstring name = g_converterToUtf8.from_bytes(onnxTensor.name());
+    // TODO: Safely sanitize the name for use in a file path.
+    std::wstring currentFileName(baseFileName);
+    currentFileName.insert(baseFileNameInsertionPoint, name);
+
+    bool succeeded = true;
+
+    PrintTensorInfo(ToUtf8Char(onnxTensor.name()), currentFileName, dimensions, dataType);
+
+    switch (outputFileType)
+    {
+    case FileType::OnnxTensor:
+        {
+            std::ofstream os(currentFileName, std::ios::binary);
+            succeeded &= onnxTensor.SerializeToOstream(&os);
+        }
+        break;
+
+    case FileType::RawData:
+        {
+            std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+            WriteBinaryFile(currentFileName.c_str(), arrayByteData);
+        }
+        break;
+
+    case FileType::CommaSeparatedValue:
+        {
+            std::u8string text;
+            std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+            WriteCsv(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), /*shouldPrintRawBytes*/false, /*out*/ text);
+            WriteBinaryFile(currentFileName.c_str(), text);
+        }
+        break;
+
+    case FileType::NumPyArray:
+        {
+            std::vector<std::byte> fileData;
+            std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
+            WriteNpy(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), dimensions, /*out*/ fileData);
+            WriteBinaryFile(currentFileName.c_str(), fileData);
+        }
+        break;
+
+    default:
+        assert(false);
+        // Switch statement could not have been entered due to `if` above.
+    }
+
+    return succeeded;
+}
+
 void StoreModel(
     _In_z_ wchar_t const* outputFilename,
     onnx::ModelProto const& model
@@ -2537,18 +2605,19 @@ void StoreModel(
         // enumerate all the tensor initializers, and dump their contents.
 
         std::wstring initialFileName(outputFilename);
-        std::wstring currentFileName(outputFilename);
-        size_t substitutionOffset = initialFileName.find('*', 0); // Find wildcard in filename mask.
-        if (substitutionOffset != std::wstring::npos)
+        size_t fileNameSubstitutionOffset = initialFileName.find('*', 0); // Find wildcard in filename mask.
+        if (fileNameSubstitutionOffset != std::wstring::npos)
         {
-            initialFileName.erase(substitutionOffset, 1);
+            // Insert the name of the tensor in place of the wildcard.
+            initialFileName.erase(fileNameSubstitutionOffset, 1);
         }
         else
         {
-            substitutionOffset = GetFileExtensionOffset(initialFileName);
-            if (substitutionOffset > 0 && initialFileName[substitutionOffset - 1] == '.')
+            // Append a suffix name just before the filename extension.
+            fileNameSubstitutionOffset = GetFileExtensionOffset(initialFileName);
+            if (fileNameSubstitutionOffset > 0 && initialFileName[fileNameSubstitutionOffset - 1] == '.')
             {
-                --substitutionOffset;
+                --fileNameSubstitutionOffset;
             }
         }
 
@@ -2558,63 +2627,30 @@ void StoreModel(
         onnx::GraphProto const& graphProto = model.graph();
         for (const onnx::TensorProto& onnxTensor : graphProto.initializer())
         {
-            // Read data type, dimensions, and name.
-            // Someone changed the data type enum in protobuf to a raw int32, which forced manual casting :/.
-            onnx::TensorProto::DataType dataType = static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type());
-
-            std::vector<int32_t> dimensions;
-            for (auto v : onnxTensor.dims())
-            {
-                dimensions.push_back(static_cast<int32_t>(v));
-            }
-
-            std::wstring name = g_converterToUtf8.from_bytes(onnxTensor.name());
-            currentFileName.assign(initialFileName);
-            currentFileName.insert(substitutionOffset, name);
-
-            PrintTensorInfo(ToUtf8Char(onnxTensor.name()), currentFileName, dimensions, dataType);
-
-            switch (outputFileType)
-            {
-            case FileType::OnnxTensor:
-                {
-                    std::ofstream os(currentFileName, std::ios::binary);
-                    succeeded &= onnxTensor.SerializeToOstream(&os);
-                }
-                break;
-
-            case FileType::RawData:
-                {
-                    std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
-                    WriteBinaryFile(currentFileName.c_str(), arrayByteData);
-                }
-                break;
-
-            case FileType::CommaSeparatedValue:
-                {
-                    std::u8string text;
-                    std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
-                    WriteCsv(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), /*shouldPrintRawBytes*/false, /*out*/ text);
-                    WriteBinaryFile(currentFileName.c_str(), text);
-                }
-                break;
-
-            case FileType::NumPyArray:
-                {
-                    std::vector<std::byte> fileData;
-                    std::vector<std::byte> arrayByteData = GetOnnxTensorRawByteData(onnxTensor);
-                    WriteNpy(arrayByteData, static_cast<onnx::TensorProto::DataType>(onnxTensor.data_type()), dimensions, /*out*/ fileData);
-                    WriteBinaryFile(currentFileName.c_str(), fileData);
-                }
-                break;
-
-            default:
-                assert(false);
-                // Switch statement could not have been entered due to `if` above.
-            }
-
+            succeeded &= StoreModelTensor(onnxTensor, outputFileType, initialFileName, fileNameSubstitutionOffset);
             ++tensorCount;
         }
+
+        for (const onnx::NodeProto& onnxNode : graphProto.node())
+        {
+            if (onnxNode.op_type() != "Constant")
+                continue;
+
+            if (onnxNode.attribute_size() == 0)
+                continue;
+
+            if (onnxNode.output_size() == 0)
+                continue;
+
+            auto const& attribute = onnxNode.attribute(0);
+            if (!attribute.has_t())
+                continue;
+
+            onnx::TensorProto const& onnxTensor = attribute.t();
+            succeeded &= StoreModelTensor(onnxTensor, outputFileType, initialFileName, fileNameSubstitutionOffset);
+            ++tensorCount;
+        }
+
         printf("%d tensors written\n", tensorCount);
     }
     else if (outputFileType == FileType::GraphVizDot)
