@@ -1,5 +1,5 @@
 Onnx2Text  
-2018-07-19..2024-06-05  
+2018-07-19..2025-06-06  
 Dwayne Robinson ([FDwR](https://github.com/fdwr))  
 
 - Converts a binary [ONNX](https://github.com/onnx/onnx) model file to text (which can be edited in any simple text editor) and vice versa.
@@ -7,6 +7,8 @@ Dwayne Robinson ([FDwR](https://github.com/fdwr))
 - Converts an ONNX tensor protobuf to text/CSV/PNG/NPY and vice versa.
 - Generates output tensor values (ones, zeros, iota series, random).
 - Exports model tensors to directory of tensor files.
+
+![Image of Onnx2Text](Screenshot.png)
 
 # Motivation
 
